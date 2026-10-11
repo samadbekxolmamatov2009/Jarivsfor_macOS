@@ -764,7 +764,7 @@ class Skills:
                 number = "+" + ph.lstrip("+")
                 return self._confirm(f"I opened the chat but couldn't press Telegram's call button. "
                                      f"Call {speakable(d.name)}, {phone_call.say_number(number)}, through your iPhone instead?",
-                                     lambda: (phone_call.call(number, "phone"), "Calling. If your Mac asks, press Call.")[1])
+                                     lambda: self._dial(number, "phone"))
             return f"I've opened your chat with {speakable(d.name)} in Telegram. Press the phone icon to call."
         name = None
         if not number:
@@ -788,7 +788,14 @@ class Skills:
         who = speakable(name) if name else "this number"
         how = "FaceTime" if via == "facetime" else "your iPhone"
         return self._confirm(f"Call {who}, {phone_call.say_number(number)}, through {how}?",
-                             lambda: (phone_call.call(number, via), "Calling. If your Mac asks, press Call.")[1])
+                             lambda: self._dial(number, via))
+
+    def _dial(self, number, via):
+        """Starts the call, then presses macOS's 'Call' confirmation for you."""
+        phone_call.call(number, via)
+        res = tg_call.press_call_dialog()
+        print(f"   📞 Call dialog: {res}", flush=True)
+        return "Calling." if res == "pressed" else "Calling. If your Mac asks, press Call."
 
     # ---------- v9: phone ----------
     def _connect_phone(self):
