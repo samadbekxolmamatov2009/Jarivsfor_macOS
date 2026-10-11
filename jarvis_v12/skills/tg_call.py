@@ -32,10 +32,12 @@ end run
 
 
 def press_call(wait=2.5):
-    """-> True if the call button was pressed."""
+    """-> 'pressed', or the reason it wasn't: 'not-found', 'no-window', 'no-telegram', 'error: ...'"""
     time.sleep(wait)                                  # let the chat open
     try:
-        r = subprocess.run(["osascript", "-e", FIND_AND_PRESS], capture_output=True, text=True, timeout=15)
-    except Exception:
-        return False
-    return r.stdout.strip() == "pressed"
+        r = subprocess.run(["osascript", "-e", FIND_AND_PRESS], capture_output=True, text=True, timeout=20)
+    except Exception as e:
+        return f"error: {e}"
+    if r.returncode != 0:
+        return "error: " + (r.stderr.strip() or "osascript failed")[:200]
+    return r.stdout.strip() or "error: empty answer"

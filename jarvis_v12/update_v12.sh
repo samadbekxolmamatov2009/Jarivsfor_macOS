@@ -8,7 +8,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 JARVIS="$HOME/jarvis"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP="$HOME/jarvis_backup_$STAMP"
-FILES="main.py wake.py ears.py stt.py voice.py bargein.py hud.py skills/docs.py skills/lang.py skills/mac_commands.py skills/power.py skills/tasks.py skills/tg_call.py"
+FILES="tg_call_debug.sh main.py wake.py ears.py stt.py voice.py bargein.py hud.py skills/docs.py skills/lang.py skills/mac_commands.py skills/power.py skills/tasks.py skills/tg_call.py"
 
 if [ ! -d "$JARVIS" ] || [ ! -x "$JARVIS/venv/bin/python" ]; then
   echo "❌ $JARVIS topilmadi (yoki venv yo'q). Avval oddiy o'rnatishni bajaring."; exit 1

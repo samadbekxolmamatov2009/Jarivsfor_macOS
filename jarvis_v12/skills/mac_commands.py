@@ -755,8 +755,16 @@ class Skills:
             if not user:
                 return f"{speakable(d.name)} has no Telegram username, so I can't open the chat directly."
             phone_call.open_telegram_chat(user)
-            if tg_call.press_call():
+            res = tg_call.press_call()
+            print(f"   📞 Telegram call button: {res}", flush=True)
+            if res == "pressed":
                 return f"Calling {speakable(d.name)} on Telegram."
+            ph = getattr(d.entity, "phone", None)
+            if ph:                                        # button not reachable: offer a normal call instead
+                number = "+" + ph.lstrip("+")
+                return self._confirm(f"I opened the chat but couldn't press Telegram's call button. "
+                                     f"Call {speakable(d.name)}, {phone_call.say_number(number)}, through your iPhone instead?",
+                                     lambda: (phone_call.call(number, "phone"), "Calling. If your Mac asks, press Call.")[1])
             return f"I've opened your chat with {speakable(d.name)} in Telegram. Press the phone icon to call."
         name = None
         if not number:
