@@ -20,6 +20,7 @@ from skills.scheduler import Scheduler
 from skills.docs import sentences as doc_sentences
 from skills.power import Power, set_qos
 from skills.tasks import TaskRunner
+from skills.autoreply import AutoReply
 
 LOCK = threading.RLock()          # voice and phone never run a command at the same moment
 
@@ -43,7 +44,7 @@ POWER = Power()
 
 def should_pause():
     """Deep sleep, or the screen is locked / display asleep (battery saver: nobody is there to talk to Jarvis)."""
-    return deep_sleep() or POWER.screen_off()
+    return deep_sleep() or POWER.screen_off() or POWER.away()
 
 
 def speech_items(reply):
@@ -192,6 +193,11 @@ def main():
     TaskRunner(skills.tasks, locked_deliver, log=log).start()
     if skills.tasks.store.pending():
         log(f"📝 {len(skills.tasks.store.pending())} open task(s)")
+
+    skills.autoreply = AutoReply(skills, brain, POWER, LOCK, log=log)
+    skills.autoreply.start()
+    if skills.autoreply.mode != "off":
+        log(f"🤖 {skills.autoreply.describe()}")
 
     skills.scheduler = Scheduler({"quiz": skills.post_quiz_now, "post": skills.post_text_now,
                                   "briefing": briefing_job}, log=log)

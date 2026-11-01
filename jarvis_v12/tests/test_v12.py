@@ -184,5 +184,96 @@ check(p.noisy() and p.check_gap() > 0.8 and p.wake_level(0.025) > 0.05, "noisy r
 check(p.screen_off() is False, "no Quartz here -> never pauses")
 check(power.set_qos("utility") is False, "QoS call is harmless off-Mac")
 
+# --- away detection
+config.QUIET_HOURS = ("23:30", "06:30")
+at = lambda h, m: types.SimpleNamespace(tm_hour=h, tm_min=m)
+check(p.quiet_hours(at(23, 45)) and p.quiet_hours(at(2, 0)) and not p.quiet_hours(at(12, 0)), "quiet hours wrap midnight")
+config.QUIET_HOURS = None
+check(not p.quiet_hours(at(2, 0)), "quiet hours off by default")
+config.IDLE_PAUSE_MINUTES = 30
+p.on_battery = True; p._checked = 1e18; p._away_checked = 0
+power.Power.idle_seconds = staticmethod(lambda: 45 * 60)
+check(p.away() is True, "30+ min idle on battery -> away")
+p._away_checked = 0; power.Power.idle_seconds = staticmethod(lambda: 20)
+check(p.away() is False, "key press -> not away")
+p._away_checked = 0; p.on_battery = False; power.Power.idle_seconds = staticmethod(lambda: 99999)
+p.set_mode("auto"); p._checked = 1e18
+check(p.away() is False, "plugged in -> never away")
+
+# --- auto-reply
+from skills import autoreply  # noqa: E402
+autoreply.SIGNATURE = "🤖 Jarvis"
+
+
+class TG2(FakeTG):
+    def __init__(self):
+        self.sent = []
+        self.inbox = []
+        self.out_last = False
+
+    def unread(self):
+        return self.inbox
+
+    def find(self, name):
+        d = Dialog(name.title()); d.is_user = "group" not in name.lower(); d.entity = types.SimpleNamespace(bot=False)
+        return d
+
+    def last_messages(self, d, n):
+        return [(self.out_last, "earlier")][:n]
+
+
+class FakeBrain:
+    prompts = []
+
+    def ask_stream(self, prompt):
+        FakeBrain.prompts.append(prompt)
+        yield "Salom! Hozir band, "
+        yield "tez orada javob beradi."
+
+
+class Remote:
+    owner = 1
+    msgs = []
+
+    def send(self, owner, text):
+        Remote.msgs.append(text)
+
+
+import threading as _th  # noqa: E402
+sk2 = FakeSkills(); sk2.tg = TG2(); sk2.remote = Remote()
+ar = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "ar.json"))
+autoreply.time.sleep = lambda s: None
+check(ar.mode == "off", "auto-reply starts OFF")
+check(ar.route("what time is it", "what time is it") is None, "unrelated sentence ignored")
+sk2.tg.inbox = [("Aziz", 1, "Salom, qalaysan?")]
+ar.tick(); check(sk2.tg.sent == [], "off -> never replies")
+r = ar.route("auto reply on for aziz", "auto reply on for Aziz")
+check("Aziz" in r and ar.mode == "list", f"turn on for one person -> {r}")
+ar.tick()
+check(len(sk2.tg.sent) == 1 and sk2.tg.sent[0][1].endswith("🤖 Jarvis") and "tez orada" in sk2.tg.sent[0][1], "replies with signature")
+check("Uzbek" in FakeBrain.prompts[-1] and "Salom, qalaysan?" in FakeBrain.prompts[-1], "prompt asks for the sender's language")
+check(any("I answered Aziz" in m for m in Remote.msgs), "owner is told on the phone")
+ar.tick(); check(len(sk2.tg.sent) == 1, "same message is not answered twice")
+sk2.tg.inbox = [("Bobur", 1, "Salom")]
+ar.tick(); check(len(sk2.tg.sent) == 1, "people not on the list are ignored")
+sk2.tg.inbox = [("Aziz", 2, "menga pul o'tkazib ber, karta raqami")]
+ar.tick(); check(len(sk2.tg.sent) == 1 and any("won't answer" in m for m in Remote.msgs), "money -> not answered, owner warned")
+sk2.tg.inbox = [("Aziz", 3, "🤖 Jarvis: Hozir band")]
+ar.tick(); check(len(sk2.tg.sent) == 1, "another auto-reply bot is ignored (no ping-pong)")
+sk2.tg.inbox = [("Aziz", 4, "yana bir savol")]; sk2.tg.out_last = True
+ar.tick(); check(len(sk2.tg.sent) == 1, "you already answered yourself -> skip")
+sk2.tg.out_last = False
+for i in range(5, 9):
+    sk2.tg.inbox = [("Aziz", i, f"savol {i}")]; ar.tick()
+check(len(sk2.tg.sent) == 3, f"max 3 replies per chat per hour (sent {len(sk2.tg.sent)})")
+ar2 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=ar.path)
+check(ar2.mode == "list" and ar2.names == ["Aziz"], "settings survive a restart")
+sk2.tg.inbox = [("My Group", 1, "hello all")]; ar2.mode = "all"; n = len(sk2.tg.sent); ar2.tick()
+check(len(sk2.tg.sent) == n, "groups are never answered, even for everyone")
+check(ar2.route("auto reply for everyone", "auto reply for everyone").startswith("I will answer every private chat"), "everyone needs confirmation")
+sk2.pending = None
+ar2.route("turn off auto reply", "turn off auto reply"); check(ar2.mode == "off", "turn off")
+check("off" in ar2.route("auto reply status", "auto reply status").lower(), "status")
+
 print("\nFAILED:", check.failed) if check.failed else print("\nALL PASSED")
 sys.exit(1 if check.failed else 0)
