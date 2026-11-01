@@ -141,6 +141,7 @@ class Skills:
         self.focus = Focus(lambda text: self.announce(text))
         self.resume_items = None     # what's left after "stop" while reading a document
         self.power = None            # battery saver (set by main.py)
+        self.autoreply = None        # answers Telegram for you (set by main.py)
         self.tasks = TaskCommands(self, parse_duration)
 
     def reset(self):
@@ -856,6 +857,7 @@ class Skills:
         # help
         if re.search(r"what can you do|what are your (commands|skills|features)|help me with commands", t):
             return ("I keep your task list and remind you on your Mac and your phone, send timed Telegram messages, "
+                    "answer your Telegram messages for you when you turn on auto-reply, "
                     "save battery, "
                     "I can make Milliy Sertifikat practice tests, post daily quizzes to your channel, answer questions "
                     "from the internet, give exchange rates, read or summarize documents, run focus mode, "
@@ -876,6 +878,12 @@ class Skills:
             elif re.search(r"\b(?:on|enable|start|activate|turn on|switch on)\b", t):
                 self.power.set_mode("on")
             return self.power.describe()
+
+        # auto-reply to Telegram messages
+        if self.autoreply:
+            r = self.autoreply.route(t, text)
+            if r is not None:
+                return r
 
         # tasks, saved reminders, timed Telegram messages
         r = self.tasks.route(t, re.sub(r"\s+", " ", re.sub(r"(?<!\d)[,!?;:](?!\d)", " ", text)).strip())

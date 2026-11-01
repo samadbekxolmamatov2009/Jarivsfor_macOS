@@ -8,6 +8,9 @@
 Voice: "battery saver on / off / auto / status".  Config (all optional):
     ECO_MODE = "auto"                 # auto | on | off
     PAUSE_WHEN_SCREEN_OFF = True
+    IDLE_PAUSE_MINUTES = 30           # on battery: microphone off after 30 min without keyboard/mouse (0 = never).
+                                      # Any key or mouse move turns it back on.
+    QUIET_HOURS = ("23:30", "06:30")  # microphone off at night (None = never)
 """
 import ctypes
 import os
@@ -46,6 +49,7 @@ class Power:
         self._checked = 0.0
         self.on_battery, self.percent, self.low_power = False, None, False
         self._screen_checked, self._screen_off = 0.0, False
+        self._away_checked, self._away = 0.0, False
         self._misses = deque(maxlen=30)          # times of wake checks that were not "hello" (noise)
 
     # ---- power source ----
@@ -112,6 +116,40 @@ class Power:
         except Exception:
             self._screen_off = False                  # no Quartz installed -> never pause
         return self._screen_off
+
+    # ---- away from the Mac ----
+    @staticmethod
+    def idle_seconds():
+        """Seconds since the last key press or mouse move (None if unknown)."""
+        m = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', _run(["ioreg", "-c", "IOHIDSystem", "-d", "4"], timeout=5))
+        return int(m.group(1)) / 1e9 if m else None
+
+    def quiet_hours(self, now=None):
+        qh = getattr(config, "QUIET_HOURS", None)
+        if not qh:
+            return False
+        try:
+            now = now or time.localtime()
+            cur = now.tm_hour * 60 + now.tm_min
+            a, b = (int(x[:2]) * 60 + int(x[3:5]) for x in qh)
+        except Exception:
+            return False
+        return a <= cur < b if a <= b else (cur >= a or cur < b)
+
+    def away(self):
+        """True when it is quiet hours, or on battery with nobody at the keyboard for IDLE_PAUSE_MINUTES.
+        (Cached 20 s. A key press or mouse move ends it.)"""
+        if time.time() - self._away_checked < 20:
+            return self._away
+        self._away_checked = time.time()
+        away = self.quiet_hours()
+        minutes = getattr(config, "IDLE_PAUSE_MINUTES", 30)
+        self.refresh()
+        if not away and minutes and self.eco() and self.on_battery:
+            idle = self.idle_seconds()
+            away = idle is not None and idle > minutes * 60
+        self._away = away
+        return away
 
     # ---- speech checks ----
     def note_miss(self):
