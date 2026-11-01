@@ -44,6 +44,11 @@ SENSITIVE = re.compile(
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
 
 
+def _norm(name):
+    """Case and apostrophe style don't matter: O'QUV = o‘quv = Oʻquv."""
+    return re.sub(r"[ʻʼ‘’`´]", "'", name).casefold().strip()
+
+
 def clean_reply(text):
     t = " ".join((text or "").split()).strip(" \"'`")
     t = re.sub(r"^(?:reply|answer|javob|message)\s*:\s*", "", t, flags=re.I)
@@ -92,9 +97,9 @@ class AutoReply(threading.Thread):
     def allowed(self, name):
         if self.mode == "all":
             return True
-        low = name.lower()
+        low = _norm(name)
         # "Aziz" in your list matches the chat "Aziz Karimov" (and the other way round)
-        return self.mode == "list" and any(n.lower() in low or low in n.lower() for n in self.names if n.strip())
+        return self.mode == "list" and any(_norm(n) in low or low in _norm(n) for n in self.names if n.strip())
 
     # ---------------- voice / phone commands ----------------
     def route(self, t, orig):

@@ -285,6 +285,10 @@ sk2.tg.inbox = [("Madina Karimova", 1, "Dars soat nechada?")]; n = len(sk2.tg.se
 check(len(sk2.tg.sent) == n + 1, "answers a configured contact with no command given")
 sk2.tg.inbox = [("Stranger", 1, "Salom")]; n = len(sk2.tg.sent); ar3.tick()
 check(len(sk2.tg.sent) == n, "answers nobody else")
+config.AUTOREPLY_CONTACTS = ["brother", "NAVOIY-QORAKO'L O'QUV MARKAZI"]
+ar5 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "n.json"))
+check(ar5.allowed("Navoiy-Qorakoʻl Oʻquv Markazi") and ar5.allowed("Brother"), "Telegram's ʻ apostrophes and capitals still match")
+config.AUTOREPLY_CONTACTS = ["Madina", "Brother"]
 ar3.route("turn off auto reply", "turn off auto reply")
 ar4 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=ar3.path)
 check(ar4.mode == "off", "if you turned it off yourself, a restart keeps it off")
