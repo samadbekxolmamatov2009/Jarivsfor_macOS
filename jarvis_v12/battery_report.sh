@@ -1,14 +1,14 @@
 #!/bin/bash
 # REAL measurement of what Jarvis costs your battery.
-#   1. Unplug the charger.  2. Close other apps, leave the Mac alone (screen on, don't type) for ~3 minutes.
+#   1. Unplug the charger.  2. Close other apps, leave the Mac alone (screen on, don't type) for ~5 minutes.
 #   3. bash ~/jarvis/battery_report.sh            (optional: PHASE=90 bash ... for a longer, more exact test)
-# It measures the Mac's power draw (watts) with Jarvis running, then with Jarvis paused, then running again,
+# It measures the Mac's power draw (watts) with Jarvis running and paused, 3 times each in a balanced order,
 # and prints Jarvis's share, your battery's real capacity/health, and what that means per hour.
 PY="$HOME/jarvis/venv/bin/python"; [ -x "$PY" ] || PY=python3
 exec "$PY" - "$@" <<'PYEOF'
 import os, re, signal, statistics, subprocess, sys, time
 
-PHASE = int(os.environ.get("PHASE", "60"))
+PHASE = int(os.environ.get("PHASE", "45"))
 STEP = 3
 
 
@@ -91,7 +91,7 @@ if not pids:
 wh_full = b["max"] * b["volt"] / 1e6
 health = 100.0 * b["max"] / b["design"] if b["design"] else float("nan")
 print(f"Battery: {wh_full:.1f} Wh now holds, health {health:.0f}% of design, {b['cycles']} cycles")
-print(f"Jarvis processes: {pids}\nMeasuring 3 x {PHASE}s — don't touch the Mac...\n", flush=True)
+print(f"Jarvis processes: {pids}\nMeasuring 6 x {PHASE}s — don't touch the Mac...\n", flush=True)
 
 
 def stop(sig):
@@ -103,23 +103,38 @@ def stop(sig):
 
 
 signal.signal(signal.SIGINT, lambda *a: (stop(signal.SIGCONT), sys.exit(1)))
+# running/paused alternate in a balanced order (R P | P R | R P) so slow drifts of the Mac's own load cancel out
+ORDER = ["running", "paused", "paused", "running", "running", "paused"]
+res = []
 try:
-    w1, c1 = phase("running", pids)
-    stop(signal.SIGSTOP)
-    time.sleep(3)
-    w0, _ = phase("paused", pids)
+    for label in ORDER:
+        stop(signal.SIGSTOP if label == "paused" else signal.SIGCONT)
+        time.sleep(3)
+        res.append((label,) + phase(label, pids))
 finally:
     stop(signal.SIGCONT)                                  # Jarvis always continues
-time.sleep(3)
-w2, c2 = phase("running", pids)
 
-with_j = (w1 + w2) / 2
-j = with_j - w0
+deltas = []
+for k in range(0, 6, 2):
+    (l1, w1, _), (l2, w2, _) = res[k][:3], res[k + 1][:3]
+    deltas.append((w1 - w2) if l1 == "running" else (w2 - w1))
+run_w = [w for l, w, _ in res if l == "running"]
+off_w = [w for l, w, _ in res if l == "paused"]
+spread = max(w for _, w, _ in res) - min(w for _, w, _ in res)
+j = statistics.median(deltas)
+cpu_avg = statistics.mean(c for l, _, c in res if l == "running")
 print("\n================ REPORT ================")
-print(f"Mac with Jarvis:    {with_j:.2f} W   -> battery lasts ~{wh_full / with_j:.1f} h from full")
-print(f"Mac without Jarvis: {w0:.2f} W   -> battery lasts ~{wh_full / w0:.1f} h from full")
-print(f"Jarvis costs:       {j:.2f} W  = {100 * j / wh_full:.2f}% of the battery per hour"
-      f"  = {100 * j * 8 / wh_full:.1f}% over 8 hours")
-print("(Accuracy about ±0.3 W. Run twice, at different times, for a trustworthy number. "
-      "While Jarvis was idle; talking to him costs more.)")
+print(f"Jarvis running:  {statistics.median(run_w):.2f} W     Jarvis paused: {statistics.median(off_w):.2f} W")
+print(f"Pair differences (running - paused): " + ", ".join(f"{d:+.2f}" for d in deltas) + " W")
+print(f"The Mac's own power moved by {spread:.1f} W during the test; Jarvis CPU averaged {cpu_avg:.1f}%.")
+if spread > 1.0 or max(deltas) - min(deltas) > 0.8:
+    print("RESULT: NOT TRUSTWORTHY — the Mac's other load changed more than Jarvis can. Close browsers/Spotlight "
+          "indexing/updates, keep the screen brightness fixed, and run again.")
+elif abs(j) < 0.3:
+    print(f"RESULT: Jarvis is below what this test can see (< 0.3 W = < {100 * 0.3 / wh_full:.1f}% battery per hour). "
+          "While idle it is not what drains your battery.")
+else:
+    print(f"RESULT: Jarvis costs about {j:.2f} W = {100 * j / wh_full:.2f}% of the battery per hour "
+          f"= {100 * j * 8 / wh_full:.1f}% over 8 hours.")
+print(f"(Battery holds {wh_full:.1f} Wh. Idle only — talking to Jarvis or a busy room costs more.)")
 PYEOF
