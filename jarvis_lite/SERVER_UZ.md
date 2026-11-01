@@ -50,7 +50,7 @@ va Jarvis'ni yangilab qayta yoqing (oldingi yangilash buyrug'i).
 
 ## Kundalik ishlatish
 - **Ro'yxatni o'zgartirish:** `nano /var/lib/jarvis-lite/contacts.txt` (qayta yoqish shart emas). Har qatorga: ism, `@username`, `+998...` yoki `id:123`.
-- **O'zingiz haqingizda ma'lumot:** `nano /var/lib/jarvis-lite/info.txt` (dars narxi, jadval...). Faylda yo'q narsani bot o'ylab topmaydi.
+- **O'zingiz haqingizda ma'lumot (kerakli, boshida bo'sh):** `nano /var/lib/jarvis-lite/info.txt` (dars narxi, jadval...). Faylda yo'q narsani bot o'ylab topmaydi.
 - **To'xtatish / yoqish:** `systemctl stop jarvis-lite` / `systemctl start jarvis-lite`.
 - **Yangilash:** 2-qadamdagi buyruqni qayta bajaring (contacts.txt va info.txt tahrirlaringiz saqlanadi).
 

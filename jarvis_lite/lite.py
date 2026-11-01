@@ -66,6 +66,8 @@ class Settings:
     grace: float = 30.0              # seconds to wait before answering (you may answer yourself meanwhile)
     contacts_file: str = "contacts.txt"
     info_file: str = "info.txt"
+    contacts_env: str = ""           # CONTACTS="Brother;Otabek Akam;@aziz"  (Render: no disk, so settings live in env vars)
+    info_env: str = ""               # INFO="Men kimman: ...\nNima qilaman: ..."  (use \n between lines)
     persona: str = ""
 
     @classmethod
@@ -74,7 +76,8 @@ class Settings:
         return cls(owner=env.get("OWNER_NAME", "Zufarbek"), owner_full=env.get("OWNER_FULL_NAME", "Zufarbek Jumayev"),
                    model=env.get("AUTOREPLY_MODEL", "claude-sonnet-5-5"), lang_mode=env.get("AUTOREPLY_LANG", "auto").lower(),
                    grace=float(env.get("GRACE_SECONDS", "30")), persona=env.get("AUTOREPLY_PERSONA", ""),
-                   contacts_file=os.path.join(d, "contacts.txt"), info_file=os.path.join(d, "info.txt"))
+                   contacts_file=os.path.join(d, "contacts.txt"), info_file=os.path.join(d, "info.txt"),
+                   contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""))
 
 
 @dataclass
@@ -100,6 +103,19 @@ def read_lines(path):
             return [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
     except OSError:
         return []
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def env_lines(value):
+    """CONTACTS / INFO from an environment variable: separated by ';' or by new lines (or a literal backslash-n)."""
+    return [x.strip() for x in re.split(r";|\n|\\n", value or "") if x.strip() and not x.strip().startswith("#")]
+
+
+def get_contacts(s):
+    """The list of people to answer: env var CONTACTS, else contacts.txt, else the built-in default list."""
+    return env_lines(s.contacts_env) or read_lines(s.contacts_file) or read_lines(os.path.join(HERE, "contacts.default.txt"))
 
 
 def allowed(sender, contacts):
@@ -207,7 +223,8 @@ class Responder:
 
     # ---- the text of the answer
     def info(self):
-        return (DEFAULT_INFO + "\n" + "\n".join(read_lines(self.s.info_file))).strip()[:6000]
+        own = env_lines(self.s.info_env) or read_lines(self.s.info_file) or read_lines(os.path.join(HERE, "info.default.txt"))
+        return (DEFAULT_INFO + "\n" + "\n".join(own)).strip()[:6000]
 
     def system_prompt(self):
         o, mode = self.s.owner, self.s.lang_mode
@@ -302,12 +319,31 @@ def load_env(path):
                 os.environ.setdefault(k.strip(), v.strip().strip("\"'"))
 
 
+async def health_server(port):
+    """Render 'Web Service' needs something listening on $PORT (and an uptime pinger can call it). Tiny, no dependencies."""
+    async def handle(reader, writer):
+        try:
+            await reader.read(1024)
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            await writer.drain()
+        except Exception:
+            pass
+        finally:
+            writer.close()
+    return await asyncio.start_server(handle, "0.0.0.0", port)
+
+
 async def amain(cmd):
     from telethon import TelegramClient, events
+    from telethon.sessions import StringSession
     env = os.environ
     data = env.get("DATA_DIR", ".")
     os.makedirs(data, exist_ok=True)
-    client = TelegramClient(os.path.join(data, "session"), int(env["TG_API_ID"]), env["TG_API_HASH"])
+    # TG_SESSION (a text string made once with make_session.py) works where files vanish, e.g. Render; else a session file
+    session = StringSession(env["TG_SESSION"].strip()) if env.get("TG_SESSION") else os.path.join(data, "session")
+    client = TelegramClient(session, int(env["TG_API_ID"]), env["TG_API_HASH"])
+    if env.get("PORT"):
+        await health_server(int(env["PORT"]))
     if cmd == "login":
         await client.start()                                  # asks for phone number, code, 2-step password
         print("✅ Logged in. Now:  sudo systemctl start jarvis-lite")
@@ -315,7 +351,7 @@ async def amain(cmd):
         return
     await client.connect()
     if not await client.is_user_authorized():
-        sys.exit("❌ Not logged in to Telegram yet. Run:  python lite.py login")
+        sys.exit("❌ Not logged in to Telegram yet. Server: python lite.py login   |   Render: set TG_SESSION (make_session.py)")
     settings = Settings.from_env()
     responder = Responder(settings, TelethonTG(client), make_notify(client, env),
                           make_claude(env.get("ANTHROPIC_API_KEY"), settings.model))
@@ -329,10 +365,10 @@ async def amain(cmd):
             return
         sender = Sender(name=" ".join(x for x in (u.first_name, u.last_name) if x), username=u.username or "",
                         phone=u.phone or "", id=u.id)
-        if allowed(sender, read_lines(settings.contacts_file)):
+        if allowed(sender, get_contacts(settings)):
             asyncio.create_task(responder.on_message(event.chat_id, event.message.id, sender))
 
-    print(f"🤖 Jarvis Lite is running. Contacts: {len(read_lines(settings.contacts_file))}  "
+    print(f"🤖 Jarvis Lite is running. Contacts: {len(get_contacts(settings))}  "
           f"Claude: {'on' if env.get('ANTHROPIC_API_KEY') else 'OFF (fixed sentences only)'}", flush=True)
     await client.run_until_disconnected()
 

@@ -169,5 +169,29 @@ for k in ("OWNER_FULL_NAME", "X"):
 lite.load_env(env)
 check(os.environ["OWNER_FULL_NAME"] == "Zufarbek Jumayev" and os.environ["X"] == "q", "env file with spaces and quotes")
 
+# ---- Render: settings from environment variables, no disk
+st = Settings.from_env({"CONTACTS": "Brother;Otabek Akam\n@aziz_u", "INFO": "Men kimman: Zufarbek;Narx: 100 000 so'm", "DATA_DIR": "/nonexistent"})
+check(lite.get_contacts(st) == ["Brother", "Otabek Akam", "@aziz_u"], "CONTACTS env var (; or new lines)")
+r2 = Responder(st, FakeTG(), None, None, sleep=instant, log=lambda m: None)
+check("Men kimman: Zufarbek" in r2.info() and "Narx: 100 000 so'm" in r2.info() and "Brother — Zufarbekning do'sti" in r2.info(), "INFO env var + built-in tone notes")
+st = Settings.from_env({"DATA_DIR": "/nonexistent"})
+check("Brother" in lite.get_contacts(st) and "Javohir Aka" in lite.get_contacts(st), "no env, no file -> the built-in default contact list")
+check("age" not in Responder(st, FakeTG(), None, None, sleep=instant).info().lower() and "18" not in Responder(st, FakeTG(), None, None, sleep=instant).info(), "built-in defaults contain no personal data")
+
+
+async def health():
+    srv = await lite.health_server(0)
+    port = srv.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    await writer.drain()
+    data = await reader.read(200)
+    writer.close()
+    srv.close()
+    return data
+
+
+check(b"200 OK" in run(health()), "health server answers 200 (Render web service / uptime pinger)")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
