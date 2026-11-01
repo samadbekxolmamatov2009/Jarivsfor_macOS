@@ -12,7 +12,7 @@ apt-get install -y -qq python3 python3-venv python3-pip >/dev/null
 echo "2/5 👤 Foydalanuvchi va papkalar..."
 id jarvis >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin jarvis
 mkdir -p "$APP" "$DATA"
-cp "$HERE/lite.py" "$HERE/langdetect.py" "$APP/"
+cp "$HERE/lite.py" "$HERE/langdetect.py" "$HERE/configure.sh" "$APP/"
 [ -f "$DATA/contacts.txt" ] || cp "$HERE/contacts.default.txt" "$DATA/contacts.txt"     # sizning tahrirlaringiz bosib ketilmaydi
 [ -f "$DATA/info.txt" ] || cp "$HERE/info.default.txt" "$DATA/info.txt"
 chown -R jarvis:jarvis "$DATA"; chmod 700 "$DATA"
@@ -34,7 +34,7 @@ systemctl enable jarvis-lite >/dev/null 2>&1
 cat <<MSG
 
 ✅ O'rnatildi. Endi 3 ta qadam qoldi:
-  1) Sozlamalarni to'ldiring (TG_API_ID, TG_API_HASH, ANTHROPIC_API_KEY):   sudo nano $ENVF
+  1) Sozlamalarni kiriting (savol-javob):   sudo bash $APP/configure.sh
   2) Telegram'ga bir marta kiring (telefon raqam, kod, parol so'raydi):
        sudo -u jarvis $APP/venv/bin/python $APP/lite.py login
   3) Ishga tushiring:   sudo systemctl start jarvis-lite   va   sudo journalctl -u jarvis-lite -f   (jurnal)

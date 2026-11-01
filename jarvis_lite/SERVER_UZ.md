@@ -21,13 +21,12 @@ ssh root@SERVER_IP_MANZILI
 apt-get update -qq && apt-get install -y -qq git && rm -rf /root/jl && git clone --depth 1 -b claude/jarvis-v12 https://github.com/samadbekxolmamatov2009/Jarivsfor_macOS.git /root/jl && sudo bash /root/jl/jarvis_lite/install_server.sh
 ```
 
-## 3. Sozlamalarni to'ldiring
+## 3. Sozlamalarni kiriting (savol-javob)
 ```bash
-nano /etc/jarvis-lite.env
+sudo bash /opt/jarvis-lite/configure.sh
 ```
-`TG_API_ID=`, `TG_API_HASH=`, `ANTHROPIC_API_KEY=` qatorlarining oxiriga o'z qiymatingizni yozing (`=` dan keyin probelsiz).
-Saqlash: `Ctrl+O`, Enter, chiqish: `Ctrl+X`.
-Telefoningizga "Brother'ga shunday javob berdim" xabari kelsin desangiz: `NOTIFY_BOT_TOKEN` (Jarvis botingiz tokeni) va `NOTIFY_CHAT_ID` (o'z Telegram id'ingiz) ni ham yozing. Yozmasangiz xabarlar Telegram'ning "Saved Messages" ga tushadi (bildirishnoma bermaydi).
+U `api_id`, `api_hash`, Claude kaliti (va ixtiyoriy: Jarvis bot tokeni, chat id) so'raydi. Kalitlar ekranda ko'rinmaydi, Enter — o'tkazib yuborish.
+Telefoningizga "Brother'ga shunday javob berdim" xabari kelsin desangiz bot tokeni va chat id'ni ham kiriting; bo'lmasa xabarlar "Saved Messages" ga tushadi (bildirishnoma bermaydi).
 
 ## 4. Telegram'ga bir marta kiring
 ```bash
