@@ -62,11 +62,7 @@ Kalit bo'lsa Jarvis xabarni **Claude** bilan o'qib, nima so'ralganini tushunadi 
    ```bash
    echo 'ANTHROPIC_API_KEY = "sk-ant-SHU-YERGA-KALITNI-QOYING"' >> ~/jarvis/config.py
    ```
-3. **Ma'lumot fayli** — SertifikatPro.com saytingiz asosida **tayyor yozilgan** va yangilash vaqtida `~/jarvis/autoreply_info.txt` ga o'zi qo'yiladi (mavjud faylingizni bosib ketmaydi). Narx/jadval/manzil/telefon saytda yo'q edi, shuning uchun ular yo'q — bilsangiz fayl oxiriga qo'shing. Faylni ochish: `open -e ~/jarvis/autoreply_info.txt`. Eski qo'lda qilish yo'li: — Jarvis faqat shu yerdagi faktlarga tayanadi (dars vaqti, narx, manzil...):
-   ```bash
-   cp ~/jarvis/autoreply_info.example.txt ~/jarvis/autoreply_info.txt && open -e ~/jarvis/autoreply_info.txt
-   ```
-   Namunadagi qavs ichidagi gaplarni o'zingiznikiga almashtiring, keraksizini o'chiring. Faylda yo'q narsani so'rashsa Jarvis o'ylab topmaydi, «egam bo'sh bo'lgach o'zi javob beradi» deydi.
+3. **Ma'lumot fayli** (`~/jarvis/autoreply_info.txt`) — Jarvis faqat shu yerdagi faktlarga tayanadi. Uni bitta buyruq bilan yozish yo'li chatda berilgan (shaxsiy ma'lumot ochiq GitHub'da turmasligi uchun repoga qo'yilmaydi). Namuna: `autoreply_info.example.txt`. Fayl har javobda qayta o'qiladi — o'zgartirgach Jarvis'ni qayta yoqish shart emas.
 4. Yangilashni bajaring (u `anthropic` kutubxonasini ham o'rnatadi), Jarvis qayta yonadi.
 
 **Narx:** model `claude-sonnet-5-5` — bir javob taxminan 0.3 sent; kuniga eng ko'pi 40 ta javob (chegara bor) → kuniga 12 sentdan oshmaydi. Arzonroq/tezroq kerak bo'lsa `config.py` ga `AUTOREPLY_MODEL = "claude-haiku-5-5"` (taxminan 30 baravar arzon, o'zbekchasi sal past bo'lishi mumkin).
