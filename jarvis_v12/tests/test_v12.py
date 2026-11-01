@@ -329,6 +329,29 @@ _Msgs.fail = None
 config.ANTHROPIC_API_KEY = ""
 del sys.modules["anthropic"]
 
+# --- voice messages, new contacts
+autoreply.DEFAULT_CONTACTS = shipped
+config.AUTOREPLY_CONTACTS = None
+ar8 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "v.json"))
+check(all(ar8.allowed(n) for n in ("Otabek Akam", "Muhammad Akam", "Javohir Aka", "Brother")) and not ar8.allowed("Stranger"), "new contacts allowed, strangers not")
+CALLS.clear(); k = len(FakeBrain.prompts); n = len(sk2.tg.sent)
+sk2.tg.inbox = [("Otabek Akam", 1, "")]; ar8.tick()
+check(len(sk2.tg.sent) == n + 1 and "Zufarbek Jumayev hozir band" in sk2.tg.sent[-1][1] and "o'zi javob yozadi" in sk2.tg.sent[-1][1], "voice message -> 'Zufarbek Jumayev is busy, will answer himself'")
+check(not CALLS and len(FakeBrain.prompts) == k, "voice message -> no AI call at all")
+check(any("I answered Otabek Akam" in m for m in Remote.msgs), "voice message -> owner told on the phone")
+sk2.tg.inbox = [("Otabek Akam", 2, None)]; n = len(sk2.tg.sent); ar8.tick()
+check(len(sk2.tg.sent) == n and any("another voice message" in m for m in Remote.msgs), "second voice message within 30 min -> not answered again, owner told")
+sk2.tg.inbox = [("Muhammad Akam", 1, "   ")]; n = len(sk2.tg.sent); ar8.tick()
+check(len(sk2.tg.sent) == n + 1, "another contact's voice message is answered (blank text)")
+for label in ("🎤 Voice message", "[voice]", "Ovozli xabar", "🎤 0:07", "Photo"):
+    ar8.voice_sent.clear(); ar8.sent.clear(); ar8.day.clear(); ar8.seen.clear()
+    sk2.tg.inbox = [("Javohir Aka", 9, label)]; k = len(FakeBrain.prompts); n = len(sk2.tg.sent); ar8.tick()
+    check(len(sk2.tg.sent) == n + 1 and len(FakeBrain.prompts) == k and "ovozli xabarni eshita olmayman" in sk2.tg.sent[-1][1], f"placeholder {label!r} is treated as a voice message")
+ar8.voice_sent.clear(); ar8.sent.clear(); ar8.day.clear(); ar8.seen.clear()
+sk2.tg.inbox = [("Javohir Aka", 10, "Voice of reason: salom, qalaysiz?")]; k = len(FakeBrain.prompts); ar8.tick()
+check(len(FakeBrain.prompts) == k + 1, "a real sentence that starts with 'Voice' is NOT mistaken for a voice message")
+autoreply.DEFAULT_CONTACTS = []
+
 # --- no commands: contacts come from config.py
 config.AUTOREPLY_CONTACTS = ["Madina", "Brother"]
 ar3 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "fresh.json"))

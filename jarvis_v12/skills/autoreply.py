@@ -44,7 +44,7 @@ INFO_FILE = os.path.join(BASE, "autoreply_info.txt")
 PER_CHAT_HOUR, PER_DAY = 3, 40
 # People Jarvis answers with no setup at all (more can be added in config.py: AUTOREPLY_CONTACTS = [...]).
 # Telegram names or part of a name; case and apostrophe style don't matter.
-DEFAULT_CONTACTS = ["Brother", "NAVOIY-QORAKO'L O'QUV MARKAZI"]
+DEFAULT_CONTACTS = ["Brother", "NAVOIY-QORAKO'L O'QUV MARKAZI", "Otabek Akam", "Muhammad Akam", "Javohir Aka"]
 SIGNATURE = getattr(config, "AUTOREPLY_SIGNATURE", "🤖 Jarvis (avto-javob)")
 # Fixed replies for languages the local AI cannot write well. AUTOREPLY_LANG in config.py:
 #   "auto" (default): Uzbek/Russian -> these sentences, English -> the AI answers
@@ -53,6 +53,9 @@ TEMPLATES = {
     "uz": "Salom! Men {owner}ning sun'iy intellekt yordamchisiman. {owner} hozir band, bo'sh bo'lishi bilan o'zi sizga javob beradi.",
     "ru": "Здравствуйте! Я ИИ-ассистент. {owner} сейчас занят и ответит вам, как только освободится.",
 }
+DEFAULT_OWNER_FULL = "Zufarbek Jumayev"    # used in the voice-message reply (override: OWNER_FULL_NAME in config.py)
+VOICE_REPLY = ("Assalomu alaykum! {owner} hozir band, ovozli xabarni eshita olmayman. "
+               "Bir necha daqiqa ichida o'zi javob yozadi.")
 DEFAULT_OWNER = "Zufarbek"                 # your name in the auto-replies (override: OWNER_NAME in config.py)
 
 # things a bot must never answer on your behalf — you get a message on your phone instead
@@ -61,6 +64,9 @@ SENSITIVE = re.compile(
     r"parol\w*|password|пароль|otp|\bkod\b|code|код|sms|token|cvv|pin|"
     r"zudlik|срочно|urgent|emergency|help me|yordam|помоги\w*|авари\w*|avariya|kasalxona|больниц\w*|hospital|"
     r"politsiya|police|полици\w*|o'lim|died|умер\w*)\b", re.I)
+# what Telegram libraries show instead of the text of a voice message / file: "🎤 Voice message", "[audio]", "Photo" ...
+VOICE_LIKE = re.compile(r"\W*(?:🎤|🎙️?|🎵|🎧|\[?\s*(?:voice|audio|ovozli|голосов\w*|аудио|media|photo|video|file|document|sticker)\b).{0,25}",
+                        re.I | re.S)
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
 
 
@@ -84,6 +90,7 @@ class AutoReply(threading.Thread):
         self.mode = "off"                     # off | list | all
         self.names = []                       # people you allowed
         self._client, self._warned = None, set()
+        self.voice_sent = {}                  # chat -> when we last answered a voice message
         self.seen = {}                        # chat -> signature of the last message already handled
         self.sent = defaultdict(deque)        # chat -> times of our replies
         self.day = deque()                    # times of all our replies
@@ -228,6 +235,7 @@ class AutoReply(threading.Thread):
 
     def handle_chat(self, name, text):
         s, now = self.s, time.time()
+        text = text or ""
         if SIGNATURE and SIGNATURE.split()[0] in text:
             return                                # another auto-reply bot: never chat with it (no ping-pong)
         with self.lock:
@@ -236,6 +244,8 @@ class AutoReply(threading.Thread):
             return                                # groups, channels and bots are never answered
         if self.mode == "all" and getattr(getattr(d, "entity", None), "contact", True) is False:
             return                                # "everyone" still means saved contacts only
+        if not text.strip() or VOICE_LIKE.fullmatch(text.strip()):   # voice message / file with no text: Jarvis can't hear it
+            return self.handle_voice(d, name, now)
         if SENSITIVE.search(text):
             self.notify(f"⚠️ {name} wrote something I won't answer for you:\n{text[:300]}")
             return
@@ -246,16 +256,30 @@ class AutoReply(threading.Thread):
         if not reply:
             self.notify(f"ℹ️ {name} wrote, I had no good answer:\n{text[:300]}")
             return
-        time.sleep(random.uniform(5, 15))         # not instant, like a person
+        self._deliver(d, name, text, reply)
+
+    def handle_voice(self, d, name, now):
+        """A voice message (or a file without text): one short fixed reply, at most once per 30 minutes per chat."""
+        if now - self.voice_sent.get(name, 0) < 1800 or not self._budget(name, now):
+            self.notify(f"🎤 {name} sent another voice message — listen to it yourself.")
+            return
+        who = getattr(config, "OWNER_FULL_NAME", "") or DEFAULT_OWNER_FULL
+        if self._deliver(d, name, "🎤 (voice message or file)", VOICE_REPLY.format(owner=who)):
+            self.voice_sent[name] = time.time()
+
+    def _deliver(self, d, name, incoming, reply):
+        """Waits a few seconds like a person, skips if you already answered, sends, records, tells your phone."""
+        time.sleep(random.uniform(5, 15))
         with self.lock:
-            last = s.tg.last_messages(d, 1)
+            last = self.s.tg.last_messages(d, 1)
             if last and last[-1][0]:              # you answered yourself in the meantime
-                return
-            s.tg.send(d, f"{reply}\n\n{SIGNATURE}" if SIGNATURE else reply)
+                return False
+            self.s.tg.send(d, f"{reply}\n\n{SIGNATURE}" if SIGNATURE else reply)
         self.sent[name].append(time.time())
         self.day.append(time.time())
         self.log(f"🤖 Auto-replied to {name}")
-        self.notify(f"🤖 I answered {name} for you.\n\n{name}: {text[:300]}\nMe: {reply}")
+        self.notify(f"🤖 I answered {name} for you.\n\n{name}: {incoming[:300]}\nMe: {reply}")
+        return True
 
     # ---------------- Claude ----------------
     def _warn_once(self, key, msg):
