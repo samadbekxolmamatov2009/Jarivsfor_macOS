@@ -8,7 +8,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 JARVIS="$HOME/jarvis"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP="$HOME/jarvis_backup_$STAMP"
-FILES="energy_report.sh tg_call_debug.sh main.py wake.py ears.py stt.py voice.py bargein.py hud.py skills/docs.py skills/lang.py skills/mac_commands.py skills/power.py skills/autoreply.py skills/tasks.py skills/tg_call.py"
+FILES="battery_report.sh energy_report.sh tg_call_debug.sh main.py wake.py ears.py stt.py voice.py bargein.py hud.py skills/docs.py skills/lang.py skills/mac_commands.py skills/power.py skills/autoreply.py skills/tasks.py skills/tg_call.py"
 
 if [ ! -d "$JARVIS" ] || [ ! -x "$JARVIS/venv/bin/python" ]; then
   echo "❌ $JARVIS topilmadi (yoki venv yo'q). Avval oddiy o'rnatishni bajaring."; exit 1
@@ -35,7 +35,7 @@ mkdir -p "$JARVIS/skills"
 for f in $FILES; do cp "$HERE/$f" "$JARVIS/$f" || { echo "❌ $f nusxalanmadi"; rollback; exit 1; }; done
 
 echo "3/5 📚 Kutubxonalar tekshirilmoqda..."
-"$JARVIS/venv/bin/python" -m pip install -q edge-tts pypdf || true
+"$JARVIS/venv/bin/python" -m pip install -q pypdf || true
 "$JARVIS/venv/bin/python" -m pip install -q pyobjc-framework-Quartz || echo "   (Quartz o'rnatilmadi — ekran qulflanganda mikrofonni o'chirish ishlamaydi, qolgani ishlaydi)"
 
 echo "4/5 🔎 O'z-o'zini tekshirish..."

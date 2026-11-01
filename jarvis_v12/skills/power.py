@@ -8,7 +8,7 @@
 Voice: "battery saver on / off / auto / status".  Config (all optional):
     ECO_MODE = "auto"                 # auto | on | off
     PAUSE_WHEN_SCREEN_OFF = True
-    IDLE_PAUSE_MINUTES = 30           # on battery: microphone off after 30 min without keyboard/mouse (0 = never).
+    IDLE_PAUSE_MINUTES = 15           # on battery: microphone off after 15 min without keyboard/mouse (0 = never).
                                       # Any key or mouse move turns it back on.
     QUIET_HOURS = ("23:30", "06:30")  # microphone off at night (None = never)
 """
@@ -53,7 +53,7 @@ class Power:
         self._misses = deque(maxlen=30)          # times of wake checks that were not "hello" (noise)
 
     # ---- power source ----
-    def refresh(self, max_age=30):
+    def refresh(self, max_age=90):
         if time.time() - self._checked < max_age:
             return
         self._checked = time.time()
@@ -105,7 +105,7 @@ class Power:
         """True while the screen is locked or the display is asleep (cached for 4 s)."""
         if not getattr(config, "PAUSE_WHEN_SCREEN_OFF", True):
             return False
-        if time.time() - self._screen_checked < 4:
+        if time.time() - self._screen_checked < 5:
             return self._screen_off
         self._screen_checked = time.time()
         try:
@@ -138,12 +138,12 @@ class Power:
 
     def away(self):
         """True when it is quiet hours, or on battery with nobody at the keyboard for IDLE_PAUSE_MINUTES.
-        (Cached 20 s. A key press or mouse move ends it.)"""
-        if time.time() - self._away_checked < 20:
+        (Cached 60 s. A key press or mouse move ends it.)"""
+        if time.time() - self._away_checked < 60:
             return self._away
         self._away_checked = time.time()
         away = self.quiet_hours()
-        minutes = getattr(config, "IDLE_PAUSE_MINUTES", 30)
+        minutes = getattr(config, "IDLE_PAUSE_MINUTES", 15)
         self.refresh()
         if not away and minutes and self.eco() and self.on_battery:
             idle = self.idle_seconds()

@@ -73,6 +73,7 @@ class Listener:
     def __init__(self, mic):
         self.mic = mic
         self.vad = VAD()
+        self.noise = 0.0                  # running average loudness of the room (battery: skip VAD on room noise)
 
     def listen(self, wait_seconds=6):
         """Returns float32 audio of one utterance, or None if you stayed silent.
@@ -84,8 +85,14 @@ class Listener:
 
         while True:
             f = self.mic.read()
-            quiet = float(np.sqrt(np.mean(f.astype(np.float32) ** 2))) < getattr(config, "SILENCE_RMS", 120)
+            x = f.astype(np.float32)
+            rms = float(np.sqrt(np.dot(x, x) / len(x)))
+            base = getattr(config, "SILENCE_RMS", 120)
+            gate = min(max(base, self.noise * 1.5), base * 3)      # noisy room -> a higher bar, never more than 3x
+            quiet = rms < gate
             is_speech = False if quiet else self.vad.predict(f, frame_size=640) >= config.VAD_THRESHOLD
+            if not started and not is_speech:
+                self.noise += 0.02 * (rms - self.noise)
 
             if not started:
                 pre.append(f)

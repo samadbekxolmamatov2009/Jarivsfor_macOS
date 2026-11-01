@@ -253,8 +253,8 @@ ar.tick(); check(sk2.tg.sent == [], "off -> never replies")
 r = ar.route("auto reply on for aziz", "auto reply on for Aziz")
 check("Aziz" in r and ar.mode == "list", f"turn on for one person -> {r}")
 ar.tick()
-check(len(sk2.tg.sent) == 1 and sk2.tg.sent[0][1].endswith("🤖 Jarvis") and "tez orada" in sk2.tg.sent[0][1], "replies with signature")
-check("Uzbek" in FakeBrain.prompts[-1] and "Salom, qalaysan?" in FakeBrain.prompts[-1], "prompt asks for the sender's language")
+check(len(sk2.tg.sent) == 1 and sk2.tg.sent[0][1].endswith("🤖 Jarvis") and "sun'iy intellekt" in sk2.tg.sent[0][1] and "Zufarbekning" in sk2.tg.sent[0][1], "replies in correct Uzbek with the owner's name, with signature")
+check(not FakeBrain.prompts, "Uzbek message -> no AI call (it writes broken Uzbek)")
 check(any("I answered Aziz" in m for m in Remote.msgs), "owner is told on the phone")
 ar.tick(); check(len(sk2.tg.sent) == 1, "same message is not answered twice")
 sk2.tg.inbox = [("Bobur", 1, "Salom")]
@@ -299,6 +299,10 @@ config.AUTOREPLY_CONTACTS = None
 autoreply.DEFAULT_CONTACTS = shipped
 config.AUTOREPLY_CONTACTS = None
 ar6 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "d.json"))
+sk2.tg.inbox = [("Brother", 1, "hello bro are you here?")]; ar6.tick()
+check(len(FakeBrain.prompts) == 1 and "English" in FakeBrain.prompts[-1] and "tez orada" in sk2.tg.sent[-1][1], "English message -> the AI answers in English")
+sk2.tg.inbox = [("Brother", 2, "nima deyapsan tushunmadim ozbekcha gapir")]; ar6.tick()
+check(len(FakeBrain.prompts) == 1 and "sun'iy intellekt" in sk2.tg.sent[-1][1], "'speak Uzbek' -> correct Uzbek sentence")
 check(ar6.mode == "list" and ar6.allowed("Brother") and ar6.allowed("Navoiy-Qorakoʻl Oʻquv Markazi") and not ar6.allowed("Stranger"),
       "shipped contacts work with no config at all")
 

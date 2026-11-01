@@ -82,6 +82,8 @@ def conversation(listener, mic, brain, voice, skills, hud, first_text=None):
             t0 = time.time()
             if wait == config.FOLLOW_UP_SECONDS:
                 # follow-up without "hello": only accept clear speech, not the TV or people nearby
+                if float(abs(audio).max()) < 0.02:          # far-away sound: not worth a Whisper run
+                    return
                 text, score = stt.transcribe_scored(audio)
                 if text and not score["ok"]:
                     log(f"🙉 ignored unclear background speech: '{text[:50]}'")
