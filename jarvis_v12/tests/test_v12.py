@@ -278,6 +278,56 @@ sk2.pending = None
 ar2.route("turn off auto reply", "turn off auto reply"); check(ar2.mode == "off", "turn off")
 check("off" in ar2.route("auto reply status", "auto reply status").lower(), "status")
 
+# --- Claude understands the message (fake SDK)
+class _Err(Exception):
+    pass
+
+
+fake = types.ModuleType("anthropic")
+fake.RateLimitError = type("RateLimitError", (_Err,), {})
+fake.APIStatusError = type("APIStatusError", (_Err,), {"status_code": 500, "type": "api_error"})
+fake.APIConnectionError = type("APIConnectionError", (_Err,), {})
+CALLS = []
+
+
+class _Msgs:
+    fail = None
+
+    def create(self, **kw):
+        CALLS.append(kw)
+        if _Msgs.fail:
+            raise _Msgs.fail
+        return types.SimpleNamespace(stop_reason="end_turn", content=[types.SimpleNamespace(type="text", text="Darslar 15:00 da boshlanadi.")])
+
+
+class _Client:
+    def __init__(self, **kw):
+        self.messages = _Msgs()
+
+
+fake.Anthropic = _Client
+sys.modules["anthropic"] = fake
+config.ANTHROPIC_API_KEY = "sk-ant-test"
+autoreply.INFO_FILE = os.path.join(tmp, "info.txt")
+open(autoreply.INFO_FILE, "w").write("# izoh: bu qator o'qilmasin\nDars jadvali: 15:00 va 17:00")
+ar7 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "c.json"))
+ar7.mode, ar7.names = "list", ["Brother"]
+before = len(FakeBrain.prompts)
+sk2.tg.inbox = [("Brother", 50, "dars soat nechada boshlanadi?")]; n = len(sk2.tg.sent); ar7.tick()
+check(sk2.tg.sent[-1][1].startswith("Darslar 15:00 da boshlanadi.") and len(sk2.tg.sent) == n + 1, "Claude answers the actual question (Uzbek)")
+c = CALLS[-1]
+check(c["model"] == "claude-sonnet-5-5" and "Dars jadvali: 15:00 va 17:00" in c["system"] and "izoh" not in c["system"] and "dars soat nechada" in c["messages"][0]["content"], "model, info file and the message are sent")
+check(len(FakeBrain.prompts) == before, "local AI not used when Claude answers")
+_Msgs.fail = fake.APIConnectionError()
+sk2.tg.inbox = [("Brother", 51, "yana savol bor")]; n = len(sk2.tg.sent); ar7.tick()
+check(len(sk2.tg.sent) == n + 1 and "sun'iy intellekt" in sk2.tg.sent[-1][1], "offline -> falls back to the fixed Uzbek sentence")
+_Msgs.fail = fake.APIStatusError()
+sk2.tg.inbox = [("Brother", 52, "hello bro how are you")]; n = len(sk2.tg.sent); ar7.tick()
+check(len(sk2.tg.sent) == n + 1, "API error -> falls back (English via local AI)")
+_Msgs.fail = None
+config.ANTHROPIC_API_KEY = ""
+del sys.modules["anthropic"]
+
 # --- no commands: contacts come from config.py
 config.AUTOREPLY_CONTACTS = ["Madina", "Brother"]
 ar3 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "fresh.json"))
@@ -299,10 +349,11 @@ config.AUTOREPLY_CONTACTS = None
 autoreply.DEFAULT_CONTACTS = shipped
 config.AUTOREPLY_CONTACTS = None
 ar6 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "d.json"))
+k = len(FakeBrain.prompts)
 sk2.tg.inbox = [("Brother", 1, "hello bro are you here?")]; ar6.tick()
-check(len(FakeBrain.prompts) == 1 and "English" in FakeBrain.prompts[-1] and "tez orada" in sk2.tg.sent[-1][1], "English message -> the AI answers in English")
+check(len(FakeBrain.prompts) == k + 1 and "English" in FakeBrain.prompts[-1] and "tez orada" in sk2.tg.sent[-1][1], "English message -> the AI answers in English")
 sk2.tg.inbox = [("Brother", 2, "nima deyapsan tushunmadim ozbekcha gapir")]; ar6.tick()
-check(len(FakeBrain.prompts) == 1 and "sun'iy intellekt" in sk2.tg.sent[-1][1], "'speak Uzbek' -> correct Uzbek sentence")
+check(len(FakeBrain.prompts) == k + 1 and "sun'iy intellekt" in sk2.tg.sent[-1][1], "'speak Uzbek' -> correct Uzbek sentence")
 check(ar6.mode == "list" and ar6.allowed("Brother") and ar6.allowed("Navoiy-Qorakoʻl Oʻquv Markazi") and not ar6.allowed("Stranger"),
       "shipped contacts work with no config at all")
 

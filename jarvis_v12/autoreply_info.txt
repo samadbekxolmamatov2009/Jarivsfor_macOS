@@ -1,0 +1,11 @@
+# Bu fayl Jarvis avto-javobi uchun bilimlar (sizning sayt SertifikatPro.com asosida yozilgan).
+# '#' bilan boshlangan qatorlar o'qilmaydi. Faqat shu yerdagi faktlarga tayaniladi — o'zgartirib, to'ldirib boring.
+
+SertifikatPro.com — Milliy sertifikat imtihoniga (matematika fani) professional tayyorlov platformasi. 1500+ o'quvchi tanlagan.
+Bosh ustoz: Javoxir Muxtorov — 7 yillik tajribali matematika ustozi; Milliy sertifikat A+ (eng qiyin smenada), toifa Oliy 88/100; 1500+ o'quvchi uning tayyorlovi orqali A va A+ sertifikat olgan.
+Yo'nalishlar: B daraja tayyorlovi (Milliy sertifikat B darajasi uchun asosiy dastur); A / A+ daraja tayyorlovi (chuqurlashtirilgan mavzular, yuqori ballarga tayyorlov).
+Online testlar: Telegram bot va Web App orqali bepul mashq. Avtomatik baholash, PDF natija, Rasch IRT modeli bo'yicha tahlil, A / A+ / B daraja tahlili, reyting tizimi, har bir savol uchun video javoblar.
+Saytda Algebra, Geometriya va Funksiyalar bo'yicha mavzu testlari bor; mini testlar — 20 daqiqa, 10 savol.
+Telegram kanal (bepul mashqlar): https://t.me/Sertifikat_pro
+Kursga yozilish: sayt orqali («Kursga yozilish» tugmasi) yoki Telegram kanal orqali.
+Narx, dars jadvali, manzil va telefon raqam haqida sizda ma'lumot yo'q: bunday savolga to'qib javob bermang, Zufarbek o'zi aniq javob beradi deng, va Telegram kanalni (https://t.me/Sertifikat_pro) tavsiya qiling.
