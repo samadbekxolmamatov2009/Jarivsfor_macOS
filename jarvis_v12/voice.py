@@ -1,6 +1,5 @@
-"""Voice: Kokoro (offline, natural), macOS 'say' (instant) or edge-tts (online).
+"""Voice: Kokoro (offline, natural) or macOS 'say' (instant). English only.
 The next sentence is synthesized while the current one is playing."""
-import asyncio
 import os
 import queue
 import re
@@ -18,7 +17,6 @@ import requests
 import sounddevice as sd
 
 import config
-from skills.lang import uz_latin
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 KOKORO_FILES = {
@@ -80,30 +78,12 @@ class Voice:
 
     # ---- synthesis (runs in main thread) ----
     def _synth(self, text, lang="en"):
-        """-> (kind, value, samplerate, original_text). Uzbek/Russian use Microsoft neural voices (internet)."""
-        if lang in ("uz", "ru"):
-            try:
-                import edge_tts
-                voice = getattr(config, "UZ_VOICE", "uz-UZ-SardorNeural") if lang == "uz" else \
-                    getattr(config, "RU_VOICE", "ru-RU-DmitryNeural")
-                path = os.path.join(tempfile.gettempdir(), f"jarvis_{uuid.uuid4().hex}.mp3")
-                asyncio.run(edge_tts.Communicate(uz_latin(text) if lang == "uz" else text, voice).save(path))
-                if os.path.exists(path) and os.path.getsize(path) > 500:
-                    return ("file", path, None, text)
-            except Exception as e:
-                if not getattr(self, "_edge_warned", False):
-                    print(f"⚠️  {lang} voice needs internet ({e}); using the English voice", flush=True)
-                    self._edge_warned = True
-            if lang == "ru":
-                return ("say_ru", text, None, text)
-            text_for_en = uz_latin(text)
-        else:
-            text_for_en = text
+        """-> (kind, value, samplerate, original_text). English only (offline): Kokoro, or macOS 'say'."""
         if self.engine == "kokoro":
-            samples, sr = self.kokoro.create(text_for_en, voice=config.KOKORO_VOICE,
+            samples, sr = self.kokoro.create(text, voice=config.KOKORO_VOICE,
                                              speed=config.SPEECH_SPEED, lang=self.lang)
             return ("file", self._wav(samples, sr), None, text)
-        return ("say", text_for_en, None, text)
+        return ("say", text, None, text)
 
     # ---- playback (runs in player thread) ----
     def _play(self, item):
@@ -121,8 +101,6 @@ class Voice:
         self.recent.append(text)                 # what the mic can hear right now (for "stop")
         if kind == "file":
             p = subprocess.Popen(["afplay", value])
-        elif kind == "say_ru":
-            p = subprocess.Popen(["say", "-v", getattr(config, "RU_SAY_VOICE", "Milena"), value])
         else:
             rate = str(int(185 * config.SPEECH_SPEED))
             p = subprocess.Popen(["say", "-v", config.SAY_VOICE, "-r", rate, value])

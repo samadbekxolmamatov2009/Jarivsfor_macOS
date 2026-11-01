@@ -132,20 +132,20 @@ class Ticker(NSObject):
         return self
 
     def watch_(self, timer):
-        """Slow check (3x per second). Starts the 30 fps animation only when Jarvis is awake."""
+        """Slow check (3x per second). Starts the 15 fps animation only when Jarvis is awake."""
         if STATE["quit"]:
             NSApplication.sharedApplication().terminate_(None)
             return
         if STATE["mode"] != "sleep" and getattr(self, "fast", None) is None:
             self.fast = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                1 / 30, self, "tick:", None, True)
+                1 / 15, self, "tick:", None, True)
 
     def tick_(self, timer):
         if STATE["quit"]:
             NSApplication.sharedApplication().terminate_(None)
             return
         target = 0.0 if STATE["mode"] == "sleep" else 1.0
-        STATE["alpha"] += (target - STATE["alpha"]) * 0.15
+        STATE["alpha"] += (target - STATE["alpha"]) * 0.28
         if abs(STATE["alpha"] - target) < 0.005:
             STATE["alpha"] = target
         self.window.setAlphaValue_(STATE["alpha"])
@@ -199,7 +199,7 @@ def main():
 
     ticker = Ticker.alloc().initWithWindow_view_(win, view)
     ticker.fast = None
-    NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(0.33, ticker, "watch:", None, True)
+    NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(0.5, ticker, "watch:", None, True)
     threading.Thread(target=demo if "--demo" in sys.argv else reader, daemon=True).start()
     app.run()
 

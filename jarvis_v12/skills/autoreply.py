@@ -17,7 +17,7 @@ Guard rails: private chats only (no groups, channels, bots) · replies are marke
 AUTOREPLY_SIGNATURE) · never answers about money, passwords, codes or emergencies — those are sent to YOU on your phone
 instead · at most 3 replies per chat per hour and 40 a day · skips a chat if you already answered it yourself · every
 reply is copied to your phone so you always see what was said in your name.
-Battery: when it is off nothing runs; when on it checks every 45 s (every 2-3 min on battery or with the screen off).
+Battery: when it is off nothing runs; when on it checks every 60 s (every 3 min on battery or with the screen off).
 Config (optional): OWNER_NAME, AUTOREPLY_PERSONA, AUTOREPLY_SIGNATURE.
 """
 import json
@@ -164,7 +164,7 @@ class AutoReply(threading.Thread):
     # ---------------- the watcher ----------------
     def interval(self):
         slow = self.power.eco() or self.power.screen_off()
-        return 150 if slow else 45
+        return 180 if slow else 60
 
     def run(self):
         while True:
@@ -248,7 +248,10 @@ class AutoReply(threading.Thread):
         except Exception:
             history = []
         convo = "\n".join(f"{'Me' if out else name}: {m[:200]}" for out, m in history)
-        lang = {"uz": "Uzbek (Latin letters)", "ru": "Russian", "en": "English"}.get(detect_lang(text), "the same language")
+        if str(getattr(config, "AUTOREPLY_LANG", "auto")).lower() == "en":
+            lang = "English"                       # config.py: AUTOREPLY_LANG = "en" -> always English
+        else:
+            lang = {"uz": "Uzbek (Latin letters)", "ru": "Russian", "en": "English"}.get(detect_lang(text), "the same language")
         prompt = (
             f"You are the personal AI assistant of {owner}. You answer Telegram messages for {owner} while they are busy. {persona}\n"
             f"Reply to {name} in {lang}, friendly and natural, 1-2 short sentences. Rules: you are an AI assistant, "
