@@ -193,5 +193,14 @@ async def health():
 
 check(b"200 OK" in run(health()), "health server answers 200 (Render web service / uptime pinger)")
 
+good = "1" + "A" * 352
+check(lite.clean_session("  \"" + good[:100] + "\n" + good[100:] + "\"  ") == good, "TG_SESSION: spaces, new lines and quotes are cleaned")
+for bad in (good[:300], good + "x", "2" + "A" * 352, ""):
+    try:
+        lite.clean_session(bad)
+        check(False, f"damaged TG_SESSION ({len(bad)} chars) must be rejected")
+    except SystemExit as e:
+        check("damaged" in str(e) and "353" in str(e), f"damaged TG_SESSION ({len(bad)} chars) -> clear message")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)

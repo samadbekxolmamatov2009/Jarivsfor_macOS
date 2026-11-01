@@ -310,6 +310,16 @@ class TelethonTG:
         return (await self.c.send_message(chat, text)).id
 
 
+def clean_session(raw):
+    """TG_SESSION as pasted: drop spaces/new lines/quotes and check the length (a good one is 353 characters)."""
+    t = re.sub(r"\s+", "", raw or "").strip("\"'")
+    if len(t) not in (353, 369) or not t.startswith("1"):
+        sys.exit(f"❌ TG_SESSION is damaged: {len(t)} characters, a good one has 353 (and starts with 1). It was cut off or "
+                 f"has extra characters. Make it again with make_session.py — it copies the string to your clipboard — "
+                 f"then paste it into Render's TG_SESSION (nothing else in the box).")
+    return t
+
+
 def load_env(path):
     if os.path.exists(path):
         for line in open(path, encoding="utf-8"):
@@ -340,7 +350,7 @@ async def amain(cmd):
     data = env.get("DATA_DIR", ".")
     os.makedirs(data, exist_ok=True)
     # TG_SESSION (a text string made once with make_session.py) works where files vanish, e.g. Render; else a session file
-    session = StringSession(env["TG_SESSION"].strip()) if env.get("TG_SESSION") else os.path.join(data, "session")
+    session = StringSession(clean_session(env["TG_SESSION"])) if env.get("TG_SESSION") else os.path.join(data, "session")
     client = TelegramClient(session, int(env["TG_API_ID"]), env["TG_API_HASH"])
     if env.get("PORT"):
         await health_server(int(env["PORT"]))
