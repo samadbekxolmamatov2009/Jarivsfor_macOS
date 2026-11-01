@@ -37,6 +37,14 @@ PER_CHAT_HOUR, PER_DAY = 3, 40
 # Telegram names or part of a name; case and apostrophe style don't matter.
 DEFAULT_CONTACTS = ["Brother", "NAVOIY-QORAKO'L O'QUV MARKAZI"]
 SIGNATURE = getattr(config, "AUTOREPLY_SIGNATURE", "🤖 Jarvis (avto-javob)")
+# Fixed replies for languages the local AI cannot write well. AUTOREPLY_LANG in config.py:
+#   "auto" (default): Uzbek/Russian -> these sentences, English -> the AI answers
+#   "en": the AI always answers in English        "llm": the AI answers in the sender's language (can be poor)
+TEMPLATES = {
+    "uz": "Salom! Men {owner}ning sun'iy intellekt yordamchisiman. {owner} hozir band, bo'sh bo'lishi bilan o'zi sizga javob beradi.",
+    "ru": "Здравствуйте! Я ИИ-ассистент. {owner} сейчас занят и ответит вам, как только освободится.",
+}
+OWNER_FALLBACK = {"uz": "egam", "ru": "владелец"}
 
 # things a bot must never answer on your behalf — you get a message on your phone instead
 SENSITIVE = re.compile(
@@ -248,10 +256,16 @@ class AutoReply(threading.Thread):
         except Exception:
             history = []
         convo = "\n".join(f"{'Me' if out else name}: {m[:200]}" for out, m in history)
-        if str(getattr(config, "AUTOREPLY_LANG", "auto")).lower() == "en":
+        mode = str(getattr(config, "AUTOREPLY_LANG", "auto")).lower()
+        code = detect_lang(text)
+        if mode == "auto" and code in TEMPLATES:
+            # The local AI writes broken Uzbek/Russian, so these two get a fixed, correct sentence instead.
+            who = getattr(config, "OWNER_NAME", "") or OWNER_FALLBACK[code]
+            return TEMPLATES[code].format(owner=who)
+        if mode == "en":
             lang = "English"                       # config.py: AUTOREPLY_LANG = "en" -> always English
         else:
-            lang = {"uz": "Uzbek (Latin letters)", "ru": "Russian", "en": "English"}.get(detect_lang(text), "the same language")
+            lang = {"uz": "Uzbek (Latin letters)", "ru": "Russian", "en": "English"}.get(code, "the same language")
         prompt = (
             f"You are the personal AI assistant of {owner}. You answer Telegram messages for {owner} while they are busy. {persona}\n"
             f"Reply to {name} in {lang}, friendly and natural, 1-2 short sentences. Rules: you are an AI assistant, "
