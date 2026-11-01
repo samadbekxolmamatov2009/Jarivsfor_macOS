@@ -204,6 +204,8 @@ check(p.away() is False, "plugged in -> never away")
 config.AUTOREPLY_CONTACTS = None
 from skills import autoreply  # noqa: E402
 autoreply.SIGNATURE = "🤖 Jarvis"
+shipped = autoreply.DEFAULT_CONTACTS
+autoreply.DEFAULT_CONTACTS = []
 
 
 class TG2(FakeTG):
@@ -293,6 +295,12 @@ ar3.route("turn off auto reply", "turn off auto reply")
 ar4 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=ar3.path)
 check(ar4.mode == "off", "if you turned it off yourself, a restart keeps it off")
 config.AUTOREPLY_CONTACTS = None
+
+autoreply.DEFAULT_CONTACTS = shipped
+config.AUTOREPLY_CONTACTS = None
+ar6 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "d.json"))
+check(ar6.mode == "list" and ar6.allowed("Brother") and ar6.allowed("Navoiy-Qorakoʻl Oʻquv Markazi") and not ar6.allowed("Stranger"),
+      "shipped contacts work with no config at all")
 
 print("\nFAILED:", check.failed) if check.failed else print("\nALL PASSED")
 sys.exit(1 if check.failed else 0)

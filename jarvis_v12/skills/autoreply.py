@@ -33,6 +33,9 @@ from .lang import detect as detect_lang
 
 FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "autoreply.json")
 PER_CHAT_HOUR, PER_DAY = 3, 40
+# People Jarvis answers with no setup at all (more can be added in config.py: AUTOREPLY_CONTACTS = [...]).
+# Telegram names or part of a name; case and apostrophe style don't matter.
+DEFAULT_CONTACTS = ["Brother", "NAVOIY-QORAKO'L O'QUV MARKAZI"]
 SIGNATURE = getattr(config, "AUTOREPLY_SIGNATURE", "🤖 Jarvis (avto-javob)")
 
 # things a bot must never answer on your behalf — you get a message on your phone instead
@@ -81,7 +84,7 @@ class AutoReply(threading.Thread):
         except (OSError, ValueError):
             pass
         cfg = getattr(config, "AUTOREPLY_CONTACTS", None) or []
-        for n in ([cfg] if isinstance(cfg, str) else cfg):
+        for n in list(DEFAULT_CONTACTS) + ([cfg] if isinstance(cfg, str) else list(cfg)):
             if n and n.lower() not in (x.lower() for x in self.names):
                 self.names.append(str(n))
         if self.names and not explicit:           # contacts are in config.py -> works with no command at all

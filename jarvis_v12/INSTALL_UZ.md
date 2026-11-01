@@ -46,6 +46,7 @@ PAUSE_WHEN_SCREEN_OFF = True
 Natijani ko'rish: *Activity Monitor → Energy* ichida «python» ning «Energy Impact» i, yoki Terminal'da `pmset -g batt` bilan soatlar bo'yicha taqqoslang.
 
 ## Avto-javobni buyruqsiz yoqish (tavsiya etiladi)
+**Brother** va **NAVOIY-QORAKO'L O'QUV MARKAZI** kodga allaqachon kiritilgan — yangilangach darrov ishlaydi, `config.py` kerak emas. Boshqa odam qo'shish uchun:
 Terminal'da bir marta (ismlarni o'zingizniki bilan almashtiring — Telegram'dagi ism yoki uning bir qismi):
 ```bash
 echo 'AUTOREPLY_CONTACTS = ["Aziz", "Madina", "Brother"]' >> ~/jarvis/config.py
