@@ -55,6 +55,25 @@ launchctl kickstart -k gui/$(id -u)/com.jarvis.assistant
 ```
 Tamom: endi Jarvis yonganda o'zi shu kontaktlarning xabarlarini o'qiydi, tushunadi va javob beradi — hech qanday buyruq kerak emas. **Ro'yxatdagi boshqa hech kimga yozmaydi.** Ro'yxatni keyin ham shu qator orqali o'zgartirasiz. Agar ovoz yoki telefon orqali «turn off auto reply» desangiz, u o'chiq qoladi (qayta yoqish: «turn on auto reply»).
 
+## Avto-javob xabar mazmunini tushunib javob berishi (Claude)
+Kalit bo'lsa Jarvis xabarni **Claude** bilan o'qib, nima so'ralganini tushunadi va o'zbekcha/ruscha/inglizcha — odam qaysi tilda yozgan bo'lsa, o'sha tilda — javob beradi.
+1. https://console.anthropic.com → **API Keys** → kalit yarating (`sk-ant-...`), **Billing** ga 5 dollar atrofida pul qo'ying.
+2. Kalitni Mac'dagi `config.py` ga yozing (GitHub'ga **hech qachon** qo'ymang):
+   ```bash
+   echo 'ANTHROPIC_API_KEY = "sk-ant-SHU-YERGA-KALITNI-QOYING"' >> ~/jarvis/config.py
+   ```
+3. **Ma'lumot fayli** — Jarvis faqat shu yerdagi faktlarga tayanadi (dars vaqti, narx, manzil...):
+   ```bash
+   cp ~/jarvis/autoreply_info.example.txt ~/jarvis/autoreply_info.txt && open -e ~/jarvis/autoreply_info.txt
+   ```
+   Namunadagi qavs ichidagi gaplarni o'zingiznikiga almashtiring, keraksizini o'chiring. Faylda yo'q narsani so'rashsa Jarvis o'ylab topmaydi, «egam bo'sh bo'lgach o'zi javob beradi» deydi.
+4. Yangilashni bajaring (u `anthropic` kutubxonasini ham o'rnatadi), Jarvis qayta yonadi.
+
+**Narx:** model `claude-sonnet-5-5` — bir javob taxminan 0.3 sent; kuniga eng ko'pi 40 ta javob (chegara bor) → kuniga 12 sentdan oshmaydi. Arzonroq/tezroq kerak bo'lsa `config.py` ga `AUTOREPLY_MODEL = "claude-haiku-5-5"` (taxminan 30 baravar arzon, o'zbekchasi sal past bo'lishi mumkin).
+**Maxfiylik:** odamning xabari va oxirgi 6 ta yozishma Anthropic API'ga yuboriladi. Pul/karta/parol/kod/zudlik haqidagi xabarlar avval filtrlanadi va **yuborilmaydi** (ularga javob ham berilmaydi).
+**Kalit yo'q yoki internet yo'q bo'lsa** — avvalgi usul: tayyor o'zbekcha/ruscha jumla va inglizchaga lokal AI. `AUTOREPLY_LANG = "en"` — doim inglizcha.
+Xato bo'lsa (kalit noto'g'ri, pul tugagan) Jarvis jurnalida `⚠️ Auto-reply: Claude API error …` chiqadi va u avtomatik zaxira usulga o'tadi.
+
 ## Avto-javob qoidalari (xavfsizlik)
 - faqat **shaxsiy chatlar** — guruh, kanal va botlarga hech qachon yozmaydi;
 - har javob oxirida **«🤖 Jarvis (avto-javob)»** belgisi bor (odamlar bot yozayotganini bilishi uchun; `config.py` da `AUTOREPLY_SIGNATURE` bilan o'zgartiriladi);

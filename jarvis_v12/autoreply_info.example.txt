@@ -1,0 +1,12 @@
+# Avto-javob bilimlari. Bu faylni nusxalang:   cp ~/jarvis/autoreply_info.example.txt ~/jarvis/autoreply_info.txt
+# so'ng autoreply_info.txt ni oching va O'ZINGIZNING haqiqiy ma'lumotlaringizni yozing (oddiy matn, istalgan tilda).
+# Jarvis FAQAT shu yerda yozilgan faktlardan foydalanadi; bu yerda yo'q narsani aytmaydi — «egam bo'sh bo'lgach o'zi javob beradi» deydi.
+# '#' bilan boshlangan qatorlar ham o'qiladi, shuning uchun ularni o'chirib, faqat o'z ma'lumotingizni qoldiring.
+
+Men kimman: (masalan: Zufarbek, Navoiy-Qorako'l o'quv markazida matematika o'qituvchisi)
+Dars jadvali: (masalan: Dushanba-Chorshanba-Juma, 15:00 va 17:00 guruhlari)
+Manzil: (o'quv markazi manzili)
+Narxlar: (oylik to'lov)
+Ro'yxatdan o'tish: (qanday yozilish kerak)
+Qachon bo'sh bo'laman: (masalan: har kuni 20:00 dan keyin)
+Boshqa muhim narsalar: (...)
