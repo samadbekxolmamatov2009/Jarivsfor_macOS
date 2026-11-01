@@ -278,6 +278,10 @@ class AutoReply(threading.Thread):
         return (
             f"You are the personal AI assistant of {owner}. You write Telegram replies on {owner}'s behalf while they are busy. "
             f"Every reply is sent automatically and marked as an auto-reply, so people know an AI wrote it.\n"
+            f"IMPORTANT: the person is writing to {owner}, not to you. Questions like 'what is your name', 'where are you', "
+            f"'are you there', 'what do you do' are meant for {owner}. Never answer them as yourself and never introduce yourself by name. "
+            f"Instead say, as {owner}'s assistant, that {owner} is busy and will reply when free; and if the answer is in the facts "
+            f"below (age, job, what {owner} does), you may give it in the third person ('{owner} is ...').\n"
             f"{lang_rule} Be friendly, natural and short: 1-3 sentences, no markdown.\n"
             f"Understand what the message actually says and answer it. For anything concrete (times, prices, addresses, "
             f"rules) use ONLY the facts under 'About {owner}' below. If the answer is not there, or it needs {owner} "
@@ -344,6 +348,7 @@ class AutoReply(threading.Thread):
             lang = {"uz": "Uzbek (Latin letters)", "ru": "Russian", "en": "English"}.get(code, "the same language")
         prompt = (
             f"You are the personal AI assistant of {owner}. You answer Telegram messages for {owner} while they are busy. {persona}\n"
+            f"{name} is writing to {owner}, not to you: never introduce yourself by name or answer 'what is your name' as yourself; say {owner} is busy and will reply. "
             f"Reply to {name} in {lang}, friendly and natural, 1-2 short sentences. Rules: you are an AI assistant, "
             f"say so if asked; never promise or agree to anything for {owner} (meetings, money, favours); never share "
             f"personal information; if the question needs {owner} personally, say {owner} will answer as soon as they are free. "

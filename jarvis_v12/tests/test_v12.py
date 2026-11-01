@@ -318,6 +318,7 @@ check(sk2.tg.sent[-1][1].startswith("Darslar 15:00 da boshlanadi.") and len(sk2.
 c = CALLS[-1]
 check(c["model"] == "claude-sonnet-5-5" and "Dars jadvali: 15:00 va 17:00" in c["system"] and "izoh" not in c["system"] and "dars soat nechada" in c["messages"][0]["content"], "model, info file and the message are sent")
 check(len(FakeBrain.prompts) == before, "local AI not used when Claude answers")
+check("is writing to Zufarbek, not to you" in c["system"] and "meant for Zufarbek" in c["system"] and "never introduce yourself by name" in c["system"], "assistant knows the message is addressed to the owner")
 _Msgs.fail = fake.APIConnectionError()
 sk2.tg.inbox = [("Brother", 51, "yana savol bor")]; n = len(sk2.tg.sent); ar7.tick()
 check(len(sk2.tg.sent) == n + 1 and "sun'iy intellekt" in sk2.tg.sent[-1][1], "offline -> falls back to the fixed Uzbek sentence")
