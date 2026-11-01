@@ -34,7 +34,6 @@ echo "2/5 📦 Yangi fayllar nusxalanmoqda..."
 mkdir -p "$JARVIS/skills"
 for f in $FILES; do cp "$HERE/$f" "$JARVIS/$f" || { echo "❌ $f nusxalanmadi"; rollback; exit 1; }; done
 
-[ -f "$JARVIS/autoreply_info.txt" ] || cp "$HERE/autoreply_info.txt" "$JARVIS/autoreply_info.txt"   # your own edits are never overwritten
 echo "3/5 📚 Kutubxonalar tekshirilmoqda..."
 "$JARVIS/venv/bin/python" -m pip install -q pypdf anthropic || true
 "$JARVIS/venv/bin/python" -m pip install -q pyobjc-framework-Quartz || echo "   (Quartz o'rnatilmadi — ekran qulflanganda mikrofonni o'chirish ishlamaydi, qolgani ishlaydi)"
