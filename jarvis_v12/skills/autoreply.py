@@ -266,7 +266,8 @@ class AutoReply(threading.Thread):
     def _info(self):
         try:
             with open(INFO_FILE, encoding="utf-8") as f:
-                return f.read().strip()[:6000]
+                lines = [l for l in f.read().splitlines() if not l.lstrip().startswith("#")]
+            return "\n".join(lines).strip()[:6000]
         except OSError:
             return ""
 

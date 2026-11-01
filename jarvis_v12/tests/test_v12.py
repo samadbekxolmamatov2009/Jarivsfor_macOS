@@ -309,14 +309,14 @@ fake.Anthropic = _Client
 sys.modules["anthropic"] = fake
 config.ANTHROPIC_API_KEY = "sk-ant-test"
 autoreply.INFO_FILE = os.path.join(tmp, "info.txt")
-open(autoreply.INFO_FILE, "w").write("Dars jadvali: 15:00 va 17:00")
+open(autoreply.INFO_FILE, "w").write("# izoh: bu qator o'qilmasin\nDars jadvali: 15:00 va 17:00")
 ar7 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "c.json"))
 ar7.mode, ar7.names = "list", ["Brother"]
 before = len(FakeBrain.prompts)
 sk2.tg.inbox = [("Brother", 50, "dars soat nechada boshlanadi?")]; n = len(sk2.tg.sent); ar7.tick()
 check(sk2.tg.sent[-1][1].startswith("Darslar 15:00 da boshlanadi.") and len(sk2.tg.sent) == n + 1, "Claude answers the actual question (Uzbek)")
 c = CALLS[-1]
-check(c["model"] == "claude-sonnet-5-5" and "Dars jadvali: 15:00 va 17:00" in c["system"] and "dars soat nechada" in c["messages"][0]["content"], "model, info file and the message are sent")
+check(c["model"] == "claude-sonnet-5-5" and "Dars jadvali: 15:00 va 17:00" in c["system"] and "izoh" not in c["system"] and "dars soat nechada" in c["messages"][0]["content"], "model, info file and the message are sent")
 check(len(FakeBrain.prompts) == before, "local AI not used when Claude answers")
 _Msgs.fail = fake.APIConnectionError()
 sk2.tg.inbox = [("Brother", 51, "yana savol bor")]; n = len(sk2.tg.sent); ar7.tick()

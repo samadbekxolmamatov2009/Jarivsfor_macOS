@@ -62,7 +62,7 @@ Kalit bo'lsa Jarvis xabarni **Claude** bilan o'qib, nima so'ralganini tushunadi 
    ```bash
    echo 'ANTHROPIC_API_KEY = "sk-ant-SHU-YERGA-KALITNI-QOYING"' >> ~/jarvis/config.py
    ```
-3. **Ma'lumot fayli** — Jarvis faqat shu yerdagi faktlarga tayanadi (dars vaqti, narx, manzil...):
+3. **Ma'lumot fayli** — SertifikatPro.com saytingiz asosida **tayyor yozilgan** va yangilash vaqtida `~/jarvis/autoreply_info.txt` ga o'zi qo'yiladi (mavjud faylingizni bosib ketmaydi). Narx/jadval/manzil/telefon saytda yo'q edi, shuning uchun ular yo'q — bilsangiz fayl oxiriga qo'shing. Faylni ochish: `open -e ~/jarvis/autoreply_info.txt`. Eski qo'lda qilish yo'li: — Jarvis faqat shu yerdagi faktlarga tayanadi (dars vaqti, narx, manzil...):
    ```bash
    cp ~/jarvis/autoreply_info.example.txt ~/jarvis/autoreply_info.txt && open -e ~/jarvis/autoreply_info.txt
    ```
