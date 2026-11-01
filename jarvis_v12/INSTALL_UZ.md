@@ -64,7 +64,7 @@ Tamom: endi Jarvis yonganda o'zi shu kontaktlarning xabarlarini o'qiydi, tushuna
 - siz o'zingiz javob yozib qo'ygan bo'lsangiz — o'tkazib yuboradi;
 - **har bir javob nusxasi telefoningizga keladi**, nima deyilganini doim ko'rasiz.
 `config.py` ga ixtiyoriy: `OWNER_NAME = "Samadbek"`, `AUTOREPLY_PERSONA = "Men o'qituvchiman, darslar haqida so'rashadi..."`.
-**Til:** o'zbekcha va ruscha xabarlarga AI yozmaydi (u bu tillarni buzib yozadi) — tayyor, to'g'ri jumla yuboriladi («Men … ning sun'iy intellekt yordamchisiman, … bo'sh bo'lishi bilan o'zi javob beradi»). Inglizcha xabarlarga lokal AI javob yozadi. `config.py` da: `OWNER_NAME = "Ismingiz"` (jumlada shu ism chiqadi), `AUTOREPLY_LANG = "auto"` (standart) | `"en"` (AI doim inglizcha) | `"llm"` (AI jo'natuvchi tilida — sifatsiz bo'lishi mumkin).
+**Til:** o'zbekcha va ruscha xabarlarga AI yozmaydi (u bu tillarni buzib yozadi) — tayyor, to'g'ri jumla yuboriladi («Men … ning sun'iy intellekt yordamchisiman, … bo'sh bo'lishi bilan o'zi javob beradi»). Inglizcha xabarlarga lokal AI javob yozadi. `config.py` da: `OWNER_NAME = "Ism"` (jumlada chiqadigan ism; standart: Zufarbek), `AUTOREPLY_LANG = "auto"` (standart) | `"en"` (AI doim inglizcha) | `"llm"` (AI jo'natuvchi tilida — sifatsiz bo'lishi mumkin).
 Inglizcha javob sifati lokal AI (brain) ga bog'liq — avval bitta ishongan odamda sinab ko'ring. Xabarlar har 45 soniyada (batareyada 2-3 daqiqada) tekshiriladi, shuning uchun javob darrov emas, 1-3 daqiqada keladi.
 
 ## Batareya: qo'shimcha choralar (v12.1)

@@ -44,7 +44,7 @@ TEMPLATES = {
     "uz": "Salom! Men {owner}ning sun'iy intellekt yordamchisiman. {owner} hozir band, bo'sh bo'lishi bilan o'zi sizga javob beradi.",
     "ru": "Здравствуйте! Я ИИ-ассистент. {owner} сейчас занят и ответит вам, как только освободится.",
 }
-OWNER_FALLBACK = {"uz": "egam", "ru": "владелец"}
+DEFAULT_OWNER = "Zufarbek"                 # your name in the auto-replies (override: OWNER_NAME in config.py)
 
 # things a bot must never answer on your behalf — you get a message on your phone instead
 SENSITIVE = re.compile(
@@ -248,7 +248,7 @@ class AutoReply(threading.Thread):
         self.notify(f"🤖 I answered {name} for you.\n\n{name}: {text[:300]}\nMe: {reply}")
 
     def compose(self, d, name, text):
-        owner = getattr(config, "OWNER_NAME", "the owner")
+        owner = getattr(config, "OWNER_NAME", "") or DEFAULT_OWNER
         persona = getattr(config, "AUTOREPLY_PERSONA", "")
         try:
             with self.lock:
@@ -260,7 +260,7 @@ class AutoReply(threading.Thread):
         code = detect_lang(text)
         if mode == "auto" and code in TEMPLATES:
             # The local AI writes broken Uzbek/Russian, so these two get a fixed, correct sentence instead.
-            who = getattr(config, "OWNER_NAME", "") or OWNER_FALLBACK[code]
+            who = getattr(config, "OWNER_NAME", "") or DEFAULT_OWNER
             return TEMPLATES[code].format(owner=who)
         if mode == "en":
             lang = "English"                       # config.py: AUTOREPLY_LANG = "en" -> always English
