@@ -201,6 +201,7 @@ p.set_mode("auto"); p._checked = 1e18
 check(p.away() is False, "plugged in -> never away")
 
 # --- auto-reply
+config.AUTOREPLY_CONTACTS = None
 from skills import autoreply  # noqa: E402
 autoreply.SIGNATURE = "🤖 Jarvis"
 
@@ -274,6 +275,20 @@ check(ar2.route("auto reply for everyone", "auto reply for everyone").startswith
 sk2.pending = None
 ar2.route("turn off auto reply", "turn off auto reply"); check(ar2.mode == "off", "turn off")
 check("off" in ar2.route("auto reply status", "auto reply status").lower(), "status")
+
+# --- no commands: contacts come from config.py
+config.AUTOREPLY_CONTACTS = ["Madina", "Brother"]
+ar3 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=os.path.join(tmp, "fresh.json"))
+check(ar3.mode == "list" and ar3.names == ["Madina", "Brother"], "contacts in config.py -> on by itself")
+check(ar3.allowed("Madina Karimova") and ar3.allowed("My Brother") and not ar3.allowed("Stranger"), "name matching + others ignored")
+sk2.tg.inbox = [("Madina Karimova", 1, "Dars soat nechada?")]; n = len(sk2.tg.sent); ar3.tick()
+check(len(sk2.tg.sent) == n + 1, "answers a configured contact with no command given")
+sk2.tg.inbox = [("Stranger", 1, "Salom")]; n = len(sk2.tg.sent); ar3.tick()
+check(len(sk2.tg.sent) == n, "answers nobody else")
+ar3.route("turn off auto reply", "turn off auto reply")
+ar4 = autoreply.AutoReply(sk2, FakeBrain(), p, _th.RLock(), log=lambda m: None, path=ar3.path)
+check(ar4.mode == "off", "if you turned it off yourself, a restart keeps it off")
+config.AUTOREPLY_CONTACTS = None
 
 print("\nFAILED:", check.failed) if check.failed else print("\nALL PASSED")
 sys.exit(1 if check.failed else 0)

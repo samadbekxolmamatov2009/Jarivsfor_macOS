@@ -1,6 +1,10 @@
 """Auto-reply: Jarvis answers your Telegram messages for you while you are busy.
 
-SAFE BY DEFAULT — it is OFF until you turn it on, and it only answers people you chose:
+NO COMMANDS NEEDED: put your people in ~/jarvis/config.py once —
+    AUTOREPLY_CONTACTS = ["Aziz", "Brother", "Madina"]
+— and from then on Jarvis starts answering them by itself, every time he runs: he reads each new message, understands
+it and replies. Nobody else (not even other saved contacts) gets an answer.
+Without that line it stays OFF, and you can still manage it by voice or from your phone:
     auto reply on for Aziz          add Aziz to the list (and switch auto-reply on)
     auto reply off for Aziz         remove him
     turn on auto reply              use the list you already made
@@ -61,13 +65,22 @@ class AutoReply(threading.Thread):
 
     # ---------------- settings ----------------
     def _load(self):
+        explicit = False                      # did you switch it on/off yourself (voice / phone)?
         try:
             with open(self.path, encoding="utf-8") as f:
                 d = json.load(f)
-            self.mode = d.get("mode", "off") if d.get("mode") in ("off", "list", "all") else "off"
+            if d.get("mode") in ("off", "list", "all"):
+                self.mode = d["mode"]
+                explicit = True
             self.names = [str(n) for n in d.get("names", [])]
         except (OSError, ValueError):
             pass
+        cfg = getattr(config, "AUTOREPLY_CONTACTS", None) or []
+        for n in ([cfg] if isinstance(cfg, str) else cfg):
+            if n and n.lower() not in (x.lower() for x in self.names):
+                self.names.append(str(n))
+        if self.names and not explicit:           # contacts are in config.py -> works with no command at all
+            self.mode = "list"
 
     def _save(self):
         tmp = self.path + ".tmp"
@@ -77,7 +90,11 @@ class AutoReply(threading.Thread):
         self.poke.set()
 
     def allowed(self, name):
-        return self.mode == "all" or (self.mode == "list" and name.lower() in (n.lower() for n in self.names))
+        if self.mode == "all":
+            return True
+        low = name.lower()
+        # "Aziz" in your list matches the chat "Aziz Karimov" (and the other way round)
+        return self.mode == "list" and any(n.lower() in low or low in n.lower() for n in self.names if n.strip())
 
     # ---------------- voice / phone commands ----------------
     def route(self, t, orig):
@@ -191,6 +208,8 @@ class AutoReply(threading.Thread):
             d = s.tg.find(name)
         if not d or getattr(d, "is_user", True) is False or getattr(getattr(d, "entity", None), "bot", False):
             return                                # groups, channels and bots are never answered
+        if self.mode == "all" and getattr(getattr(d, "entity", None), "contact", True) is False:
+            return                                # "everyone" still means saved contacts only
         if SENSITIVE.search(text):
             self.notify(f"⚠️ {name} wrote something I won't answer for you:\n{text[:300]}")
             return

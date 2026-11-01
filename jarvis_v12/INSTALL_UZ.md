@@ -8,7 +8,7 @@
 | ✉️ **Vaqtida xabar yuborish** | `Tomorrow at nine am tell Aziz the lesson is moved` — Jarvis tasdiq so'raydi, so'ng o'sha vaqtda o'zi Telegram'dan yuboradi. |
 | 📞 **Telegram qo'ng'iroq** | `Call Aziz on Telegram` — chatni ochadi va qo'ng'iroq tugmasini o'zi bosadi (Accessibility ruxsati kerak). Tugmani topolmasa «trubka belgisini bosing» deydi. Oddiy telefon raqamlariga iPhone orqali qo'ng'iroq avvalgidek ishlaydi. |
 | 🔋 **Batareya tejash** | Quyida. Ovoz bilan: `Battery saver on / off / auto / status`. |
-| 🤖 **Avto-javob** | Telegram xabarlariga Jarvis sizning o'rningizga javob beradi. **Boshida o'chiq**, faqat siz tanlagan odamlarga ishlaydi: `Auto reply on for Aziz` · `Auto reply off for Aziz` · `Turn off auto reply` · `Auto reply status` · `Auto reply for everyone` (tasdiq so'raydi). Telefondagi bot orqali ham boshqariladi. Quyida xavfsizlik qoidalari. |
+| 🤖 **Avto-javob** | Telegram xabarlariga Jarvis sizning o'rningizga javob beradi. Ro'yxatni `config.py` ga yozsangiz o'zi ishlaydi (pastga qarang); yozmasangiz o'chiq. Faqat siz tanlagan odamlarga ishlaydi: `Auto reply on for Aziz` · `Auto reply off for Aziz` · `Turn off auto reply` · `Auto reply status` · `Auto reply for everyone` (tasdiq so'raydi). Telefondagi bot orqali ham boshqariladi. Quyida xavfsizlik qoidalari. |
 | ☀️ **Ertalabki briefing** | endi ochiq vazifalaringizni ham aytadi. |
 
 ## O'rnatish (eski versiya o'rniga) — 3 qadam
@@ -44,6 +44,15 @@ ECO_MODE = "auto"                # auto | on | off
 PAUSE_WHEN_SCREEN_OFF = True
 ```
 Natijani ko'rish: *Activity Monitor → Energy* ichida «python» ning «Energy Impact» i, yoki Terminal'da `pmset -g batt` bilan soatlar bo'yicha taqqoslang.
+
+## Avto-javobni buyruqsiz yoqish (tavsiya etiladi)
+Terminal'da bir marta (ismlarni o'zingizniki bilan almashtiring — Telegram'dagi ism yoki uning bir qismi):
+```bash
+echo 'AUTOREPLY_CONTACTS = ["Aziz", "Madina", "Brother"]' >> ~/jarvis/config.py
+echo 'OWNER_NAME = "Samadbek"' >> ~/jarvis/config.py
+launchctl kickstart -k gui/$(id -u)/com.jarvis.assistant
+```
+Tamom: endi Jarvis yonganda o'zi shu kontaktlarning xabarlarini o'qiydi, tushunadi va javob beradi — hech qanday buyruq kerak emas. **Ro'yxatdagi boshqa hech kimga yozmaydi.** Ro'yxatni keyin ham shu qator orqali o'zgartirasiz. Agar ovoz yoki telefon orqali «turn off auto reply» desangiz, u o'chiq qoladi (qayta yoqish: «turn on auto reply»).
 
 ## Avto-javob qoidalari (xavfsizlik)
 - faqat **shaxsiy chatlar** — guruh, kanal va botlarga hech qachon yozmaydi;
