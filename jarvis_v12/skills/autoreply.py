@@ -53,6 +53,10 @@ TEMPLATES = {
     "uz": "Salom! Men {owner}ning sun'iy intellekt yordamchisiman. {owner} hozir band, bo'sh bo'lishi bilan o'zi sizga javob beradi.",
     "ru": "Здравствуйте! Я ИИ-ассистент. {owner} сейчас занят и ответит вам, как только освободится.",
 }
+# Always part of the facts Claude sees (your own lines go in ~/jarvis/autoreply_info.txt).
+DEFAULT_INFO = ("Otabek Akam, Muhammad Akam va Javohir Aka — Zufarbekning katta yoshdagi hurmatli tanishlari (akalari). "
+                "Ular bilan hurmat bilan, \"siz\" deb gaplash.\n"
+                "Brother — Zufarbekning do'sti. Brother bilan oddiy, do'stona, norasmiy (\"sen\" deb) gaplash.")
 DEFAULT_OWNER_FULL = "Zufarbek Jumayev"    # used in the voice-message reply (override: OWNER_FULL_NAME in config.py)
 VOICE_REPLY = ("Assalomu alaykum! {owner} hozir band, ovozli xabarni eshita olmayman. "
                "Bir necha daqiqa ichida o'zi javob yozadi.")
@@ -291,9 +295,9 @@ class AutoReply(threading.Thread):
         try:
             with open(INFO_FILE, encoding="utf-8") as f:
                 lines = [l for l in f.read().splitlines() if not l.lstrip().startswith("#")]
-            return "\n".join(lines).strip()[:6000]
+            return (DEFAULT_INFO + "\n" + "\n".join(lines)).strip()[:6000]
         except OSError:
-            return ""
+            return DEFAULT_INFO
 
     def _system_prompt(self, owner, mode):
         lang_rule = ("Always reply in English." if mode == "en" else
