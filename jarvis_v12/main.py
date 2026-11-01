@@ -197,9 +197,13 @@ def main():
         log(f"📝 {len(skills.tasks.store.pending())} open task(s)")
 
     skills.autoreply = AutoReply(skills, brain, POWER, LOCK, log=log)
-    skills.autoreply.start()
-    if skills.autoreply.mode != "off":
-        log(f"🤖 {skills.autoreply.describe()}")
+    if getattr(config, "AUTOREPLY_ENABLED", True) is False:      # the server (Jarvis Lite) answers instead: no double replies
+        skills.autoreply.mode = "off"
+        log("🤖 Auto-reply is OFF on this Mac (AUTOREPLY_ENABLED = False) — the server answers your messages")
+    else:
+        skills.autoreply.start()
+        if skills.autoreply.mode != "off":
+            log(f"🤖 {skills.autoreply.describe()}")
 
     skills.scheduler = Scheduler({"quiz": skills.post_quiz_now, "post": skills.post_text_now,
                                   "briefing": briefing_job}, log=log)

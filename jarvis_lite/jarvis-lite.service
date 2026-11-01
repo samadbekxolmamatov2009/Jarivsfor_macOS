@@ -1,0 +1,19 @@
+[Unit]
+Description=Jarvis Lite — Telegram auto-reply
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=jarvis
+WorkingDirectory=/opt/jarvis-lite
+EnvironmentFile=/etc/jarvis-lite.env
+ExecStart=/opt/jarvis-lite/venv/bin/python /opt/jarvis-lite/lite.py run
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
