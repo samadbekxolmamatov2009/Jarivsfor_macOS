@@ -56,7 +56,7 @@ va Jarvis'ni yangilab qayta yoqing (oldingi yangilash buyrug'i).
 
 ## Qoidalar (xavfsizlik)
 Faqat shaxsiy chatlar va faqat ro'yxatdagi odamlar · har javob "🤖 Jarvis (avto-javob)" belgisi bilan · pul/karta/parol/kod/zudlik haqidagi xabarlarga javob **yo'q**, o'rniga sizga xabar · ovozli xabarga tayyor javob ("Zufarbek Jumayev hozir band, o'zi javob yozadi") ·
-siz o'zingiz javob yozsangiz (30 soniya ichida) bot jim turadi · chatga soatiga 3 ta, kuniga 40 ta chegarasi.
+siz o'zingiz 4 daqiqa ichida javob yozsangiz bot jim turadi · chatga soatiga 3 ta, kuniga 40 ta chegarasi.
 
 ## Xavfsizlik ogohlantirishi
 `/var/lib/jarvis-lite/session*` fayli Telegram akkauntingizga to'liq kirish beradi, `/etc/jarvis-lite.env` da esa kalitlaringiz bor. Server parolini murakkab qiling,

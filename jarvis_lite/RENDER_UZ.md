@@ -42,7 +42,7 @@ Pullik narx yoqmasa, **Web Service** + **Free** tarifini sinab ko'rsa bo'ladi: D
 Bu ishonchsizroq: uxlab turgan paytda kelgan xabar javobsiz qolishi mumkin. Menga **pullik Worker** ishonchliroq tuyuladi.
 
 ## Sinash
-Brother'dan savol yozishini so'rang: 35-45 soniyada javob kelishi, oxirida "🤖 Jarvis (avto-javob)" belgisi bo'lishi kerak. **Mac'dagi Jarvis o'chiq bo'lsin** (yoki `AUTOREPLY_ENABLED = False`), aks holda ikki marta javob oladi.
+Brother'dan savol yozishini so'rang: taxminan 4 daqiqadan keyin javob kelishi, oxirida "🤖 Jarvis (avto-javob)" belgisi bo'lishi kerak. **Mac'dagi Jarvis o'chiq bo'lsin** (yoki `AUTOREPLY_ENABLED = False`), aks holda ikki marta javob oladi.
 
 ## Keyin
 - **Ro'yxat/ma'lumotni o'zgartirish:** Render → Environment → `CONTACTS` / `INFO` ni o'zgartiring; xizmat o'zi qayta ishga tushadi.

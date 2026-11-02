@@ -193,5 +193,42 @@ async def health():
 
 check(b"200 OK" in run(health()), "health server answers 200 (Render web service / uptime pinger)")
 
+good = "1" + "A" * 352
+check(lite.clean_session("  \"" + good[:100] + "\n" + good[100:] + "\"  ") == good, "TG_SESSION: spaces, new lines and quotes are cleaned")
+for bad in (good[:300], good + "x", "2" + "A" * 352, ""):
+    try:
+        lite.clean_session(bad)
+        check(False, f"damaged TG_SESSION ({len(bad)} chars) must be rejected")
+    except SystemExit as e:
+        check("damaged" in str(e) and "353" in str(e), f"damaged TG_SESSION ({len(bad)} chars) -> clear message")
+
+check(Settings().grace == 240 and Settings.from_env({}).grace == 240 and Settings.from_env({"GRACE_SECONDS": "60"}).grace == 60, "default wait is 4 minutes (GRACE_SECONDS can change it)")
+waits = []
+
+
+async def record(sec):
+    waits.append(sec)
+
+
+r3, tg3, n3, st3 = make(fake_claude)
+st3.grace = 240
+r3.sleep = record
+run(r3.on_message(5, tg3.add("salom"), bro))
+check(waits and 240 <= waits[0] <= 260 and len(tg3.sent) == 1, f"waits about 4 minutes before answering ({waits[0]:.0f}s)")
+tg3.msgs.clear(); waits.clear()
+mid = tg3.add("savol")
+orig_sleep = r3.sleep
+
+
+async def owner_answers(sec):                                   # you reply during the 4 minutes
+    waits.append(sec)
+    tg3.add("men shu yerdaman", out=True)
+
+
+r3.sleep = owner_answers
+n = len(tg3.sent)
+run(r3.on_message(6, mid, bro))
+check(len(tg3.sent) == n and waits, "you answer within the 4 minutes -> Jarvis stays quiet")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)

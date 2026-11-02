@@ -6,6 +6,7 @@ The string gives full access to your Telegram account: paste it ONLY into Render
 Terminal (Cmd+K). Do not run Jarvis Lite anywhere else with the same string at the same time."""
 import asyncio
 import getpass
+import subprocess
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -18,8 +19,19 @@ async def main():
     await client.start()                                   # asks for phone number, code, 2-step password
     string = client.session.save()
     await client.disconnect()
-    print("\n===== TG_SESSION (copy the ONE long line below, it is a secret) =====")
-    print(string)
-    print("=====================================================================\n")
+    try:                                                   # macOS: put it on the clipboard, so nothing can be cut off while copying
+        subprocess.run(["pbcopy"], input=string.encode(), check=True)
+        copied = True
+    except Exception:
+        copied = False
+    print(f"\n✅ Session made ({len(string)} characters; a good one is 353).")
+    if copied:
+        print("📋 It is ALREADY COPIED to your clipboard: go to Render → Environment → TG_SESSION and press Cmd+V.")
+        print("   (Nothing else should be in the box. Don't copy anything else before you paste.)")
+    else:
+        print("===== TG_SESSION (the ONE long line below, it is a secret) =====")
+        print(string)
+        print("================================================================")
+    print("Afterwards clear this Terminal (Cmd+K).\n")
 
 asyncio.run(main())

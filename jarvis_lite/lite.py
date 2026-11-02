@@ -7,7 +7,7 @@
 * Claude reads the message and answers in the sender's language, using the facts in info.txt
 * voice messages: one fixed reply ("... is busy, will answer himself in a few minutes")
 * private chats only; never money/password/code/emergency topics (those are forwarded to YOU instead);
-  3 replies per chat per hour, 40 a day; waits GRACE_SECONDS first so that if you answer yourself it stays quiet
+  3 replies per chat per hour, 40 a day; waits ~4 minutes first (GRACE_SECONDS=240) so that if you answer yourself it stays quiet
 * every reply is marked "🤖 Jarvis (avto-javob)" and a copy is sent to your phone (Telegram bot), or Saved Messages
 Settings: environment file, see env.example.   Edit contacts.txt / info.txt any time — they are re-read for every message.
 """
@@ -63,7 +63,7 @@ class Settings:
     owner_full: str = "Zufarbek Jumayev"
     model: str = "claude-sonnet-5-5"
     lang_mode: str = "auto"          # auto | en | llm
-    grace: float = 30.0              # seconds to wait before answering (you may answer yourself meanwhile)
+    grace: float = 240.0             # seconds to wait before answering (4 minutes: you may answer yourself meanwhile)
     contacts_file: str = "contacts.txt"
     info_file: str = "info.txt"
     contacts_env: str = ""           # CONTACTS="Brother;Otabek Akam;@aziz"  (Render: no disk, so settings live in env vars)
@@ -75,7 +75,7 @@ class Settings:
         d = env.get("DATA_DIR", ".")
         return cls(owner=env.get("OWNER_NAME", "Zufarbek"), owner_full=env.get("OWNER_FULL_NAME", "Zufarbek Jumayev"),
                    model=env.get("AUTOREPLY_MODEL", "claude-sonnet-5-5"), lang_mode=env.get("AUTOREPLY_LANG", "auto").lower(),
-                   grace=float(env.get("GRACE_SECONDS", "30")), persona=env.get("AUTOREPLY_PERSONA", ""),
+                   grace=float(env.get("GRACE_SECONDS", "240")), persona=env.get("AUTOREPLY_PERSONA", ""),
                    contacts_file=os.path.join(d, "contacts.txt"), info_file=os.path.join(d, "info.txt"),
                    contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""))
 
@@ -164,13 +164,17 @@ class Responder:
             while True:
                 self.dirty.discard(chat)
                 await self.process(chat, sender)
-                if chat not in self.dirty:
+                if chat not in self.dirty or not await self.has_new(chat):
                     break
         finally:
             self.busy.discard(chat)
 
+    async def has_new(self, chat):
+        """Is there an incoming message we have not dealt with yet?"""
+        return any(not m.out and m.id > self.handled.get(chat, 0) for m in await self.tg.recent(chat, 12))
+
     async def process(self, chat, sender):
-        await self.sleep(random.uniform(5, 15) + self.s.grace)      # like a person; you may answer first
+        await self.sleep(self.s.grace + random.uniform(0, 20))      # ~4 minutes: you may answer first
         msgs = await self.tg.recent(chat, 12)
         new = [m for m in msgs if not m.out and m.id > self.handled.get(chat, 0)]
         if not new:
@@ -310,6 +314,16 @@ class TelethonTG:
         return (await self.c.send_message(chat, text)).id
 
 
+def clean_session(raw):
+    """TG_SESSION as pasted: drop spaces/new lines/quotes and check the length (a good one is 353 characters)."""
+    t = re.sub(r"\s+", "", raw or "").strip("\"'")
+    if len(t) not in (353, 369) or not t.startswith("1"):
+        sys.exit(f"❌ TG_SESSION is damaged: {len(t)} characters, a good one has 353 (and starts with 1). It was cut off or "
+                 f"has extra characters. Make it again with make_session.py — it copies the string to your clipboard — "
+                 f"then paste it into Render's TG_SESSION (nothing else in the box).")
+    return t
+
+
 def load_env(path):
     if os.path.exists(path):
         for line in open(path, encoding="utf-8"):
@@ -340,7 +354,7 @@ async def amain(cmd):
     data = env.get("DATA_DIR", ".")
     os.makedirs(data, exist_ok=True)
     # TG_SESSION (a text string made once with make_session.py) works where files vanish, e.g. Render; else a session file
-    session = StringSession(env["TG_SESSION"].strip()) if env.get("TG_SESSION") else os.path.join(data, "session")
+    session = StringSession(clean_session(env["TG_SESSION"])) if env.get("TG_SESSION") else os.path.join(data, "session")
     client = TelegramClient(session, int(env["TG_API_ID"]), env["TG_API_HASH"])
     if env.get("PORT"):
         await health_server(int(env["PORT"]))
