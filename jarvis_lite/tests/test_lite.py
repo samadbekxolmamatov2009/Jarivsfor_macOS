@@ -439,7 +439,7 @@ check(not tg.sent and any("Unga nima deb yozay?" in x for x in notes) and 5 in r
 
 r, tg, notes, st, prompts = owner_setup({"action": "send", "message": "salom", "reply": ""})
 run(r.on_owner_message("unga salom ayt"))
-check(not prompts and not tg.sent and any("Qaysi odam" in x for x in notes), "no person known -> asks which one, no AI call")
+check(not tg.sent and any("Qaysi odam" in x for x in notes), "no person named and none known -> asks which one, sends nothing")
 
 for bad in ("bu JSON emas", '{"action": "delete_everything", "message": "x"}', '{"action": "send", "message": ""}'):
     r, tg, notes, st, prompts = owner_setup(bad)
@@ -513,6 +513,118 @@ r, tg, notes, st = make(fake_claude)
 seen.clear()
 run(r.on_message(9, tg.add("dars soat nechada?"), saved))
 check(len(tg.sent) == 1 and seen, "a contact saved in your Telegram (not in the list) gets the normal AI answer")
+
+# ---- the mistake from the screenshot: "send it to Muhammad Akam" must NOT go to Brother
+class MultiTG:
+    """Several chats: chat id -> messages; find() by name or id; delete()."""
+    def __init__(self):
+        self.chats = {5: [], 6046141246: []}
+        self.people = [(5, "Brother"), (6046141246, "Muhammad Akam"), (7, "Otabek Akam"), (8, "Javohir Aka")]
+        self.n = 5000
+        self.deleted = []
+
+    def add(self, chat, text, out=False):
+        self.n += 1
+        self.chats[chat].append(Msg(self.n, out, text, "text"))
+        return self.n
+
+    async def recent(self, chat, n):
+        return list(self.chats.get(chat, [])[-n:])
+
+    async def send(self, chat, text):
+        return self.add(chat, text, out=True)
+
+    async def find(self, q):
+        qn = lite.norm(q)
+        if qn.isdigit():
+            return [(c, nm) for c, nm in self.people if str(c) == qn]
+        hits = [(c, nm) for c, nm in self.people if qn in lite.norm(nm) or lite.norm(nm) in qn]
+        exact = [h for h in hits if lite.norm(h[1]) == qn]
+        return exact if len(exact) == 1 else hits
+
+    async def delete(self, chat, ids):
+        self.deleted.append((chat, list(ids)))
+        self.chats[chat] = [m for m in self.chats[chat] if m.id not in ids]
+
+
+def multi_setup(plans):
+    answers = list(plans)
+    prompts = []
+
+    async def claude_multi(system, user):
+        prompts.append((system, user))
+        return _json.dumps(answers.pop(0))
+
+    notes = []
+
+    async def notify(x):
+        notes.append(x)
+    tg = MultiTG()
+    d = tempfile.mkdtemp()
+    st = Settings(grace=0, contacts_file=os.path.join(d, "c.txt"), info_file=os.path.join(d, "i.txt"))
+    r = Responder(st, tg, notify, claude_multi, sleep=yielding_sleep, log=lambda m: None)
+    r.now = lambda: clock[0]
+    return r, tg, notes, prompts
+
+
+async def yielding_sleep(sec):
+    await asyncio.sleep(0)
+
+
+MSG = "Zufarbek sizga yozishni so'radi: agar 5-noyabrgacha server to'lovi amalga oshirilmasa, botimiz ishlashdan to'xtaydi."
+r, tg, notes, prompts = multi_setup([{"action": "send", "target": "Muhammad Akam", "message": MSG, "reply": ""}])
+run(r.attention(5, "Brother", "bazani bering", "🙋 Brother kutyapti"))            # the latest note is about Brother
+run(r.on_owner_message("6046141246 shu chat idilik Muhammad Akam degan contactimga xabar yoz: agar 5-noyabrgacha server tolovni amalga oshirmasak botimiz ishlashdan toxtaydi"))
+akam = [m for m in tg.chats[6046141246] if m.out]
+check(len(akam) == 1 and "5-noyabrgacha" in akam[0].text and not [m for m in tg.chats[5] if m.out], "named person gets the message, Brother (latest note) gets NOTHING")
+check("Current conversation person: Brother" in prompts[0][1] and '"target"' in prompts[0][0], "Claude is told who the current person is and to fill 'target'")
+check(any("Muhammad Akam ga yubordim" in x for x in notes), "you are shown who it was sent to")
+
+r, tg, notes, prompts = multi_setup([{"action": "send", "target": "6046141246", "message": MSG, "reply": ""}])
+run(r.on_owner_message("6046141246 ga yoz: ..."))
+check(len([m for m in tg.chats[6046141246] if m.out]) == 1, "a chat id works as the target (even with no current person)")
+
+r, tg, notes, prompts = multi_setup([{"action": "send", "target": "Akam", "message": MSG, "reply": ""}])
+run(r.attention(5, "Brother", "x", "🙋"))
+run(r.on_owner_message("Akamga yoz"))
+check(not any(tg.chats[c] for c in tg.chats if any(m.out for m in tg.chats[c])) and any("qaysi biri" in x and "Otabek Akam" in x and "Muhammad Akam" in x for x in notes), "ambiguous name ('Akam') -> asks which one, sends nothing")
+
+r, tg, notes, prompts = multi_setup([{"action": "send", "target": "Nonexistent Person", "message": MSG, "reply": ""}])
+run(r.attention(5, "Brother", "x", "🙋"))
+run(r.on_owner_message("Nonexistent Personga yoz"))
+check(not any(m.out for c in tg.chats for m in tg.chats[c]) and any("topa olmadim" in x for x in notes), "unknown name -> 'not found', sends nothing (not to the latest person)")
+
+# correction + duplicate guard
+r, tg, notes, prompts = multi_setup([
+    {"action": "send", "target": "", "message": MSG, "reply": ""},                          # first (wrong, it goes to Brother = current)
+    {"action": "send", "target": "", "message": MSG, "reply": ""},                          # the same text again to the same person
+    {"action": "send", "target": "Muhammad Akam", "message": MSG, "reply": ""},             # the correction
+])
+run(r.attention(5, "Brother", "x", "🙋"))
+run(r.on_owner_message("serverga to'lov haqida yoz"))
+run(r.on_owner_message("yana yoz"))
+check(len([m for m in tg.chats[5] if m.out]) == 1 and any("allaqachon yuborilgan" in x for x in notes), "the same message is never sent twice to the same chat within 10 minutes")
+run(r.on_owner_message("brotherga emas muhammad akam deganiga yubor degandim"))
+check(len([m for m in tg.chats[6046141246] if m.out]) == 1, "'not to Brother, to Muhammad Akam' -> goes to Muhammad Akam")
+
+# take back a wrong message
+r, tg, notes, prompts = multi_setup([{"action": "send", "target": "", "message": MSG, "reply": ""},
+                                     {"action": "delete_last", "target": "Brother", "message": "", "reply": ""}])
+run(r.attention(5, "Brother", "x", "🙋"))
+run(r.on_owner_message("yoz"))
+mine = [m for m in tg.chats[5] if m.out]
+tg.add(5, "oddiy xabarim, o'chirma", out=True)                                         # YOUR own message in the same chat
+run(r.on_owner_message("brotherga yuborganingni o'chir"))
+check(tg.deleted and tg.deleted[0][0] == 5 and tg.deleted[0][1] == [mine[0].id], "'delete it' removes the assistant's message from that chat")
+check(any(m.text == "oddiy xabarim, o'chirma" for m in tg.chats[5]) and any("o'chirdim" in x for x in notes), "...and never touches your own messages")
+
+# after a restart the in-memory list is empty: only messages carrying the assistant's mark are found
+r, tg, notes, prompts = multi_setup([{"action": "delete_last", "target": "Brother", "message": "", "reply": ""}])
+tg.add(5, "salom aka", out=True)
+sig_id = tg.add(5, "Zufarbek band.\n\n🤖 Jarvis (avto-javob)", out=True)
+run(r.on_owner_message("brotherga yuborganingni o'chir"))
+check(tg.deleted == [(5, [sig_id])], "after a restart it still finds only the messages that carry the assistant's mark")
+check(lite.parse_plan('{"action": "delete_last", "target": "Brother"}')["target"] == "Brother" and lite.parse_plan('{"action": "send", "message": "x"}')["target"] == "", "plan parsing: target and delete_last")
 
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
