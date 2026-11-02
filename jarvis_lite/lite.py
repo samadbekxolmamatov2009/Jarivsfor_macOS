@@ -194,6 +194,7 @@ class Responder:
         self.stranger_sent, self.stranger_day = defaultdict(deque), deque()
         self.names, self.last_chat = {}, None   # whom the latest notes were about
         self.owner_buf, self.owner_busy = [], False
+        self.owner_sent, self.owner_sent_at = defaultdict(list), {}     # what the assistant sent on your orders (to avoid duplicates / to take back)
         self.owner_hist = deque(maxlen=10)      # your conversation with the bot (so "oziga ayt" after "javob bermayman" works)
 
     # ---- entry point: called for every incoming private message from an allowed person
@@ -397,37 +398,39 @@ class Responder:
             self.owner_busy = False
 
     async def handle_owner(self, msgs):
-        chat = self.last_chat
         for t in msgs:
             self.owner_hist.append(f"Owner: {t}")
-        if chat is None:
-            return await self.notify("Qaysi odam haqida yozyapsiz? Menga yuborgan xabarimga «javob» (reply) qilib yozing.")
         if not self.claude:
             return await self.notify("Hozir AI ishlamayapti (Claude kaliti yo'q). Faqat «yo'q» deb yozsangiz eslatmalarni o'chiraman.")
-        name = self.names.get(chat, "the contact")
+        cur = self.last_chat                                  # the person of the latest note / the note you replied to
+        cur_name = self.names.get(cur, "") if cur is not None else ""
         o = self.s.owner
         try:
-            recent = await self.tg.recent(chat, 8)
+            recent = await self.tg.recent(cur, 8) if cur is not None else []
         except Exception:
             recent = []
-        chat_lines = "\n".join(f"{o if m.out else name}: {m.text[:200]}" for m in recent if m.text)
-        pend = self.pending.get(chat)
+        chat_lines = "\n".join(f"{o if m.out else cur_name}: {m.text[:200]}" for m in recent if m.text)
+        pend = self.pending.get(cur) if cur is not None else None
         system = (
-            f"You are {o}'s AI assistant. {o} (the OWNER) is texting you privately about his conversation with {name}. "
-            f"Decide what to do. Answer with ONE JSON object and nothing else: "
-            f'{{"action": "send" | "dismiss" | "dismiss_and_send" | "ask" | "none", "message": "...", "reply": "..."}}\n'
-            f"- send / dismiss_and_send: write \"message\" TO {name}: in the language {name} writes in (Uzbek in Latin script by default), "
+            f"You are {o}'s AI assistant. {o} (the OWNER) is texting you privately. Decide what to do. "
+            f"Answer with ONE JSON object and nothing else: "
+            f'{{"action": "send" | "dismiss" | "dismiss_and_send" | "delete_last" | "ask" | "none", "target": "...", "message": "...", "reply": "..."}}\n'
+            f"- \"target\": WHO the instruction is about. Leave it \"\" if it is about the person of the current conversation "
+            f"({cur_name or 'nobody yet'}). If {o} names ANOTHER person (a name like \"Muhammad Akam\", or a number = a chat id like 6046141246), "
+            f"or CORRECTS you (\"not to X, to Y\"), put exactly that name or number in \"target\". Never guess a person {o} did not name.\n"
+            f"- send / dismiss_and_send: write \"message\" TO the target person: in the language that person writes in (Uzbek in Latin script by default), "
             f"short (1-3 sentences). Speak as {o}'s assistant relaying what {o} said (third person: \"{o} ...\"), because the message "
             f"is marked as written by an AI. Say ONLY what {o} told you: never promise, agree, or add facts, dates, money. "
             f"If {o} asked for a nice / polite / gentle style, be warm and respectful. A message to an older relative uses \"siz\".\n"
-            f"- dismiss: {o} does not want to answer {name}; stop reminding. Send nothing. dismiss_and_send: both.\n"
-            f"- ask: the instruction is unclear or a detail is missing; put ONE short question in \"reply\".\n"
+            f"- dismiss: {o} does not want to answer that person; stop reminding. Send nothing. dismiss_and_send: both.\n"
+            f"- delete_last: {o} asks to delete / withdraw / take back what you sent that person (\"o'chir\", \"noto'g'ri yuboribsan\").\n"
+            f"- ask: the instruction is unclear, a detail or the person is missing; put ONE short question in \"reply\".\n"
             f"- none: not an instruction (thanks, a test).\n"
             f"\"reply\" = a very short confirmation or answer to {o}, in Uzbek (Latin). Use the whole conversation: later owner "
-            f"messages refine earlier ones (e.g. \"tell him\" after \"I don't want to answer\" means: relay that decision politely). "
-            f"The owner's texts are instructions from {o} himself; the chat lines below are from a third party.\n\n"
+            f"messages refine or correct earlier ones. The owner's texts are instructions from {o} himself; the chat lines below are from a third party.\n\n"
             f"What {o} knows about himself:\n{self.info()}")
-        user = (f"Recent chat with {name}:\n{chat_lines or '(empty)'}\n\n"
+        user = (f"Current conversation person: {cur_name or '(none)'}\n"
+                f"Recent chat with {cur_name or 'them'}:\n{chat_lines or '(empty)'}\n\n"
                 f"Waiting for {o}'s answer: {pend['text'][:300] if pend else '(nothing marked)'}\n\n"
                 f"Conversation between {o} and you so far:\n" + "\n".join(self.owner_hist))
         try:
@@ -438,20 +441,67 @@ class Responder:
         plan = parse_plan(raw)
         if not plan:
             return await self.notify("Tushunmadim 🤔 Qaytadan, boshqacha yozib ko'ring.")
-        action, message, reply = plan["action"], plan["message"], plan["reply"]
+        action, message, reply, target = plan["action"], plan["message"], plan["reply"], plan["target"]
+        if action in ("ask", "none"):
+            out = reply or "Tushunmadim 🤔"
+            self.owner_hist.append(f"Assistant: {out[:200]}")
+            return await self.notify(out)
+
+        # --- WHO? the person you named wins over "the latest note"
+        chat, name = cur, cur_name
+        if target:
+            found = await self.tg.find(target)
+            if not found:
+                return await self.notify(f"«{target}» degan odamni topa olmadim. Aniq ismini (Telegram'dagidek) yoki chat raqamini yozing.")
+            if len(found) > 1:
+                names = "\n".join(f"• {n}" for _, n in found[:6])
+                out = f"«{target}» ga bir nechta odam mos keldi — qaysi biri?\n{names}\nAniq ismini yozing."
+                self.owner_hist.append(f"Assistant: {out[:200]}")
+                return await self.notify(out)
+            chat, name = found[0]
+            self.names[chat] = name
+        if chat is None:
+            return await self.notify("Qaysi odam haqida yozyapsiz? Ismini yozing yoki menga yuborgan xabarimga «javob» (reply) qilib yozing.")
+
+        if action == "delete_last":
+            return await self.delete_last(chat, name)
         if action in ("dismiss", "dismiss_and_send"):
             self.pending.pop(chat, None)
         if action in ("send", "dismiss_and_send") and message:
+            key = (chat, norm(message))
+            if self.now() - self.owner_sent_at.get(key, -1e9) < 600:
+                return await self.notify(f"ℹ️ Bu xabar {name} ga yaqinda allaqachon yuborilgan — qayta yubormadim.")
             mid = await self.tg.send(chat, f"{message}\n\n{SIGNATURE}")
             self.our_ids.add(mid)
-            self.handled[chat] = max([self.handled.get(chat, 0)] + [m.id for m in recent if not m.out])
+            self.owner_sent_at[key] = self.now()
+            self.owner_sent[chat].append(mid)
+            try:
+                seen_in = await self.tg.recent(chat, 8)
+            except Exception:
+                seen_in = []
+            self.handled[chat] = max([self.handled.get(chat, 0)] + [m.id for m in seen_in if not m.out])
             out = f"✅ {name} ga yubordim:\n«{message}»" + ("\n\nEslatmalar o'chirildi." if action == "dismiss_and_send" else "")
-        elif action == "dismiss":
-            out = f"✅ Bo'ldi, {name} haqida boshqa eslatmayman."
         else:
-            out = reply or "Tushunmadim 🤔"
+            out = f"✅ Bo'ldi, {name} haqida boshqa eslatmayman."
         self.owner_hist.append(f"Assistant: {out[:200]}")
         await self.notify(out)
+
+    async def delete_last(self, chat, name):
+        """Takes back what the assistant sent to that person (only messages carrying its own mark — never yours)."""
+        ids = list(self.owner_sent.get(chat, []))
+        if not ids:
+            try:
+                ids = [m.id for m in await self.tg.recent(chat, 30) if m.out and SIGNATURE in m.text][-3:]
+            except Exception:
+                ids = []
+        if not ids:
+            return await self.notify(f"{name} dan o'chiradigan (mening) xabarim topilmadi.")
+        try:
+            await self.tg.delete(chat, ids)
+        except Exception as e:
+            return await self.notify(f"O'chira olmadim: {type(e).__name__}")
+        self.owner_sent[chat] = []
+        await self.notify(f"🗑 {name} dan {len(ids)} ta xabarimni o'chirdim.")
 
     def dismiss_all(self):
         n = len(self.pending)
@@ -535,12 +585,13 @@ def parse_plan(raw):
     except ValueError:
         return None
     action = str(d.get("action", "")).strip().lower()
-    if action not in ("send", "dismiss", "dismiss_and_send", "ask", "none"):
+    if action not in ("send", "dismiss", "dismiss_and_send", "delete_last", "ask", "none"):
         return None
     message = clean_reply(str(d.get("message") or "")) if action in ("send", "dismiss_and_send") else ""
     if action in ("send", "dismiss_and_send") and not message:
         action = "dismiss" if action == "dismiss_and_send" else "none"
-    return {"action": action, "message": message, "reply": " ".join(str(d.get("reply") or "").split())[:400]}
+    return {"action": action, "message": message, "reply": " ".join(str(d.get("reply") or "").split())[:400],
+            "target": " ".join(str(d.get("target") or "").split())[:80]}
 
 
 def make_claude(api_key, model):
@@ -592,6 +643,24 @@ class TelethonTG:
 
     async def send(self, chat, text):
         return (await self.c.send_message(chat, text)).id
+
+    async def delete(self, chat, ids):
+        await self.c.delete_messages(chat, ids, revoke=True)
+
+    async def find(self, query):
+        """A chat id (digits) or a name -> [(chat_id, name)] of matching private chats with people (never bots)."""
+        q = str(query).strip()
+        out = []
+        async for d in self.c.iter_dialogs(limit=400):
+            if not d.is_user or getattr(d.entity, "bot", False):
+                continue
+            if re.fullmatch(r"-?\d{5,}", q):
+                if str(d.id) == q:
+                    return [(d.id, d.name)]
+            elif norm(q) and (norm(q) in norm(d.name) or (norm(d.name) and norm(d.name) in norm(q))):
+                out.append((d.id, d.name))
+        exact = [x for x in out if norm(x[1]) == norm(q)]
+        return exact if len(exact) == 1 else out
 
 
 def clean_session(raw):

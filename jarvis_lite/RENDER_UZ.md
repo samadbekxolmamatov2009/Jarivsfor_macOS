@@ -65,6 +65,9 @@ Bot yuborgan xabarga **javob (reply)** qilib, oddiy so'z bilan yozing, masalan:
 - «oziga aytib qo'y, chiroyli ravishda» → bot unga nazokatli xabar yozadi (oxirida «🤖 Jarvis (avto-javob)» belgisi) va nima yuborganini sizga ko'rsatadi
 - «ertaga javob beraman deb ayt» → shunday xabar ketadi
 
+**Kimga ekanini o'zingiz ayting:** «Muhammad Akamga yoz: ...» yoki chat raqamini (`🔖` dan keyingi raqam) yozing — bot aynan o'sha odamga yuboradi, oxirgi xabar bergan odamga emas. Ismga bir nechta odam mos kelsa (masalan «Akam»), qaysi biri ekanini so'raydi. Topa olmasa, hech kimga yubormaydi.
+**Xato ketsa:** «brotherga yuborganingni o'chir» desangiz, bot yuborgan xabarini o'sha odamdan o'chiradi (faqat o'zining belgili xabarlarini; sizniki hech qachon). Bir xil matnni bir odamga 10 daqiqada ikki marta yubormaydi.
+
 2-3 ta qisqa xabar ketma-ket yozsangiz, bot ularni birga o'qiydi. Reply qilmasangiz, eng oxirgi xabar bergan odam haqida deb tushunadi. Tushunmasa, nima deb yozishini so'raydi, o'zboshimcha hech narsa yubormaydi. Oddiy «yo'q» (yoki `/skip`) — hamma eslatmalarni o'chiradi.
 Bot odamga faqat o'zingiz aytgan narsani yozadi: va'da bermaydi, sana/pul qo'shmaydi.
 
