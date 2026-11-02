@@ -327,5 +327,63 @@ sb, sm = run(notify_check())
 check(len(sb) == 1 and "TOKEN" in sb[0][0] and b"chat_id=12345" in sb[0][1], "bot notification goes to your own account id (no NOTIFY_CHAT_ID needed)")
 check(sm == ["fallback", "no bot"], "bot can't deliver / no bot -> Saved Messages")
 
+# ---- reminders: nothing from you for 30 minutes -> "will you answer?"
+clock = [1000.0]
+
+
+def remind_setup(claude=needs_you, **kw):
+    r, tg, notes, st = make(claude, **kw)
+    r.now = lambda: clock[0]
+    return r, tg, notes, st
+
+
+r, tg, notes, st = remind_setup()
+run(r.on_message(5, tg.add("ertaga uchrashamizmi?"), bro))
+check(len(notes) == 1 and 5 in r.pending, "needs-you message -> notified once and a reminder is planned")
+clock[0] += 29 * 60
+run(r.check_reminders())
+check(len(notes) == 1, "before 30 minutes -> no reminder")
+clock[0] += 2 * 60
+run(r.check_reminders())
+check(len(notes) == 2 and "Javob berasizmi" in notes[1] and "yo'q" in notes[1] and "ertaga uchrashamizmi?" in notes[1], "after 30 minutes -> 'will you answer?' with the message and the way to say no")
+clock[0] += 31 * 60
+run(r.check_reminders())
+check(len(notes) == 3 and not r.pending, "second (last) reminder, then it stops")
+clock[0] += 99 * 60
+run(r.check_reminders())
+check(len(notes) == 3, "no more reminders after the limit")
+
+r, tg, notes, st = remind_setup()
+run(r.on_message(5, tg.add("ertaga uchrashamizmi?"), bro))
+tg.add("ha, ertaga ko'rishamiz", out=True)                    # you answered (from the phone)
+clock[0] += 31 * 60
+run(r.check_reminders())
+check(len(notes) == 1 and not r.pending, "you answered the person -> no reminder")
+
+r, tg, notes, st = remind_setup(fake_claude)
+run(r.on_message(5, tg.add("", kind="voice"), bro))
+clock[0] += 31 * 60
+run(r.check_reminders())
+check(len(notes) == 2 and "Javob berasizmi" in notes[1], "Jarvis's own auto-reply does not count as YOUR answer -> still reminds")
+
+r, tg, notes, st = remind_setup()
+run(r.on_message(5, tg.add("ertaga uchrashamizmi?"), bro))
+check(r.dismiss_all() == 1 and not r.pending, "«yo'q» to the bot -> reminders cancelled")
+clock[0] += 99 * 60
+run(r.check_reminders())
+check(len(notes) == 1, "...and nothing is sent afterwards")
+check(all(lite.DISMISS.match(lite.norm(x)) for x in ("yo'q", "Yo‘q", "/skip", "no", "нет", "bekor qil")) and not lite.DISMISS.match("yoqimli"), "dismiss words")
+
+r, tg, notes, st = remind_setup(fake_claude)
+run(r.on_message(5, tg.add("salom"), bro))
+clock[0] += 99 * 60
+run(r.check_reminders())
+check(not r.pending and notes == [], "routine small talk never creates reminders")
+r, tg, notes, st = pay_setup()
+r.now = lambda: clock[0]
+run(r.on_message(5, tg.add("karta raqamingiz?"), muh))
+check(not r.pending, "card/amount answers never create reminders")
+check(Settings.from_env({}).remind_after == 1800 and Settings.from_env({}).remind_times == 2 and Settings.from_env({"REMIND_MINUTES": "10", "REMIND_TIMES": "3"}).remind_after == 600, "REMIND_MINUTES / REMIND_TIMES settings")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
