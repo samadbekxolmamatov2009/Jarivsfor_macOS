@@ -230,5 +230,45 @@ n = len(tg3.sent)
 run(r3.on_message(6, mid, bro))
 check(len(tg3.sent) == n and waits, "you answer within the 4 minutes -> Jarvis stays quiet")
 
+# ---- Muhammad Akam: card number / amount (card lives only in env, never in the code)
+CARD = "0000 1111 2222 3333"                                   # a made-up number for the test
+check("9860" not in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lite.py")).read(), "the real card number is not in the source code")
+muh = Sender(name="Muhammad Akam", id=9, contact=True)
+
+
+def pay_setup(**kw):
+    r, tg, notes, st = make(fake_claude, **kw)
+    st.pay_card, st.pay_contact, st.pay_amount, st.pay_for = CARD, "Muhammad Akam", "13$", "cefr tys boti serveri"
+    return r, tg, notes, st
+
+
+for q in ("karta raqamingizni tashlab yuboring", "Qayerga tashlay?", "Номер карты?", "send me your card number please"):
+    r, tg, notes, st = pay_setup()
+    run(r.on_message(5, tg.add(q), muh))
+    check(len(tg.sent) == 1 and CARD in tg.sent[0] and "13$" in tg.sent[0] and "cefr tys" in tg.sent[0], f"card asked ({q!r}) -> card number + 13$")
+for q in ("qancha tashlay?", "Summa necha?", "how much", "13$ mi?"):
+    r, tg, notes, st = pay_setup()
+    run(r.on_message(5, tg.add(q), muh))
+    check(len(tg.sent) == 1 and "13$" in tg.sent[0] and CARD not in tg.sent[0], f"amount asked ({q!r}) -> only 13$")
+r, tg, notes, st = pay_setup()
+seen.clear()
+run(r.on_message(5, tg.add("botda xatolik bor, tekshirib bering"), muh))
+check(any("wrote something else" in x and "botda xatolik" in x for x in notes) and len(tg.sent) == 1 and CARD not in tg.sent[0] and seen, "something else -> you are told, normal AI reply (no card)")
+r, tg, notes, st = pay_setup()
+run(r.on_message(5, tg.add("ha tashladim, tekshirib ko'ring"), muh))
+check(any("wrote something else" in x for x in notes) and CARD not in " ".join(tg.sent), "'I paid' -> you are told")
+r, tg, notes, st = pay_setup()
+run(r.on_message(5, tg.add("karta raqamingiz?"), Sender(name="Muhammad Akam", id=10, contact=False)))
+check(CARD not in " ".join(tg.sent), "same name but NOT a saved contact -> card number is never given")
+run(r.on_message(5, tg.add("karta raqamingiz?"), Sender(name="Muhammad Akam", id=10)))
+check(CARD not in " ".join(tg.sent), "unknown contact status -> card number is never given")
+r, tg, notes, st = pay_setup()
+run(r.on_message(5, tg.add("karta raqamingiz?"), Sender(name="Brother", id=11, contact=True)))
+check(CARD not in " ".join(tg.sent) and any("won't answer" in x for x in notes), "any other contact asking for the card -> not given, you are told")
+r, tg, notes, st = make(fake_claude)
+run(r.on_message(5, tg.add("karta raqamingiz?"), muh))
+check(not tg.sent or all("karta raqami:" not in x for x in tg.sent), "PAY_CARD not set -> the rule is off")
+check(Settings.from_env({"PAY_CARD": " 1111 "}).pay_card == "1111" and Settings.from_env({}).pay_amount == "13$", "PAY_* settings from env")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)

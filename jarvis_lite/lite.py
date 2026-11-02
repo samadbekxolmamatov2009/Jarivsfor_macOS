@@ -41,6 +41,13 @@ SENSITIVE = re.compile(
     r"parol\w*|password|пароль|otp|\bkod\b|code|код|sms|token|cvv|pin|"
     r"zudlik|срочно|urgent|emergency|help me|yordam|помоги\w*|авари\w*|avariya|kasalxona|больниц\w*|hospital|"
     r"politsiya|police|полици\w*|o'lim|died|умер\w*)\b", re.I)
+# Muhammad Akam asking for your card number / the amount (Uzbek, Russian, English)
+CARD_INTENT = re.compile(
+    r"\b(?:karta\w*|card|карт\w*|raqam\w*|hisob\s*raqam\w*|rekvizit\w*|реквизит\w*|номер\w*|"
+    r"qayerga\s+(?:tashla|o'tkaz|yubor|to'la|tushur|jo'nat)\w*|qaysi\s+(?:karta|hisob)\w*|"
+    r"куда\s+(?:скин|перев|отправ)\w*|where\s+(?:to\s+)?(?:send|transfer|pay))", re.I)
+AMOUNT_INTENT = re.compile(
+    r"\b(?:qancha|necha\s*(?:pul|dollar|so'm)?|summa\w*|miqdor\w*|narx\w*|how\s+much|сколько|сумм\w*)\b|dollar\w*|\$", re.I)
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
 PER_CHAT_HOUR, PER_DAY, VOICE_GAP = 3, 40, 1800
 
@@ -69,6 +76,11 @@ class Settings:
     contacts_env: str = ""           # CONTACTS="Brother;Otabek Akam;@aziz"  (Render: no disk, so settings live in env vars)
     info_env: str = ""               # INFO="Men kimman: ...\nNima qilaman: ..."  (use \n between lines)
     persona: str = ""
+    # One trusted contact may be given your card number for a payment (kept in env vars, never in the code):
+    pay_contact: str = "Muhammad Akam"
+    pay_card: str = ""               # PAY_CARD="...."  (empty = this special rule is OFF)
+    pay_amount: str = "13$"
+    pay_for: str = "cefr tys boti serveri"
 
     @classmethod
     def from_env(cls, env=os.environ):
@@ -77,7 +89,9 @@ class Settings:
                    model=env.get("AUTOREPLY_MODEL", "claude-sonnet-5-5"), lang_mode=env.get("AUTOREPLY_LANG", "auto").lower(),
                    grace=float(env.get("GRACE_SECONDS", "240")), persona=env.get("AUTOREPLY_PERSONA", ""),
                    contacts_file=os.path.join(d, "contacts.txt"), info_file=os.path.join(d, "info.txt"),
-                   contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""))
+                   contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""),
+                   pay_contact=env.get("PAY_CONTACT", "Muhammad Akam"), pay_card=env.get("PAY_CARD", "").strip(),
+                   pay_amount=env.get("PAY_AMOUNT", "13$"), pay_for=env.get("PAY_FOR", "cefr tys boti serveri"))
 
 
 @dataclass
@@ -95,6 +109,7 @@ class Sender:
     phone: str = ""
     id: int = 0
     bot: bool = False
+    contact: bool = None             # saved in your Telegram contacts? (None = unknown)
 
 
 def read_lines(path):
@@ -193,6 +208,13 @@ class Responder:
                 return await self.voice(chat, name, now)
             return await self.notify(f"📎 {name} sent a file/photo without text — look at it yourself.")
         text = "\n".join(texts)
+        if self.pay_applies(sender):                        # the one contact who pays for the bot's server
+            kind = self.pay_intent(text)
+            if kind:
+                if not self.budget(chat, now):
+                    return await self.notify(f"ℹ️ Auto-reply limit reached for {name}. Their message:\n{text[:300]}")
+                return await self.deliver(chat, name, text, self.pay_reply(kind))
+            await self.notify(f"💬 {name} ({self.s.pay_for}) wrote something else — look at it:\n{text[:300]}")
         if SENSITIVE.search(text):
             return await self.notify(f"⚠️ {name} wrote something I won't answer for you:\n{text[:300]}")
         if not self.budget(chat, now):
@@ -202,6 +224,28 @@ class Responder:
         if not reply:
             return await self.notify(f"ℹ️ {name} wrote, I had no good answer:\n{text[:300]}")
         await self.deliver(chat, name, text, reply)
+
+    # ---- the payment rule: only for ONE named contact, only if he is saved in your Telegram contacts, only if PAY_CARD is set
+    def pay_applies(self, sender):
+        s = self.s
+        if not (s.pay_card and s.pay_contact) or sender.contact is not True:
+            return False
+        n, who = norm(s.pay_contact), norm(sender.name)
+        return bool(who) and (n in who or who in n)
+
+    @staticmethod
+    def pay_intent(text):
+        t = norm(text)
+        if CARD_INTENT.search(t):
+            return "card"
+        return "amount" if AMOUNT_INTENT.search(t) else None
+
+    def pay_reply(self, kind):
+        s = self.s
+        if kind == "card":
+            return (f"Assalomu alaykum! {s.pay_for} uchun to'lov: {s.pay_amount}. "
+                    f"{s.owner_full}ning karta raqami: {s.pay_card}. Rahmat!")
+        return f"Assalomu alaykum! {s.pay_for} uchun to'lov: {s.pay_amount}."
 
     async def voice(self, chat, name, now):
         if now - self.voice_at.get(chat, 0) < VOICE_GAP or not self.budget(chat, now):
@@ -378,7 +422,7 @@ async def amain(cmd):
         if u is None or getattr(u, "bot", False) or getattr(u, "is_self", False):
             return
         sender = Sender(name=" ".join(x for x in (u.first_name, u.last_name) if x), username=u.username or "",
-                        phone=u.phone or "", id=u.id)
+                        phone=u.phone or "", id=u.id, contact=getattr(u, "contact", None))
         if allowed(sender, get_contacts(settings)):
             asyncio.create_task(responder.on_message(event.chat_id, event.message.id, sender))
 

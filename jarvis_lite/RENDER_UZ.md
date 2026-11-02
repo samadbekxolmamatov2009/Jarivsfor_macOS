@@ -33,6 +33,8 @@ Oxirida **bitta uzun qator** chiqadi — bu `TG_SESSION`. Uni nusxalang (Cmd+C).
 | `INFO` | `Men kimman: Zufarbek Jumayev, 18 yoshdaman, dasturchiman.;Nima qilaman: har qanday dasturlarni yozaman. IT (dasturlash) fanidan dars ham o'taman.` (qatorlar `;` bilan ajratiladi; o'zingiz haqingizda faktlar — shaxsiy ma'lumot GitHub'da emas, faqat shu yerda turadi) |
 | `PYTHON_VERSION` | `3.12.7` (qurish (build) Python versiyasi bilan xato bersa) |
 | `NOTIFY_BOT_TOKEN`, `NOTIFY_CHAT_ID` | ixtiyoriy: telefonga bildirishnoma (bo'lmasa xabarlar Telegram'dagi "Saved Messages"ga tushadi, bildirishnoma bermaydi) |
+| `PAY_CARD` | **Muhammad Akam** uchun: karta raqamingiz (16 xona, bo'shliqlar bilan). U faqat shu yerda turadi, kodda/GitHub'da emas. Bo'sh qoldirsangiz bu qoida o'chiq. |
+| `PAY_AMOUNT`, `PAY_FOR`, `PAY_CONTACT` | ixtiyoriy (tayyor qiymatlari: `13$`, `cefr tys boti serveri`, `Muhammad Akam`) |
 | `CONTACTS` | ixtiyoriy: `Brother;Otabek Akam;@username` — bo'sh qoldirsangiz tayyor ro'yxat ishlaydi (Brother, NAVOIY-QORAKO'L O'QUV MARKAZI, Otabek Akam, Muhammad Akam, Javohir Aka) |
 
 5. **Create Background Worker**. **Logs** bo'limida `🤖 Jarvis Lite is running. Contacts: 5  Claude: on` chiqishi kerak.
@@ -40,6 +42,9 @@ Oxirida **bitta uzun qator** chiqadi — bu `TG_SESSION`. Uni nusxalang (Cmd+C).
 ## Bepul variant (ehtiyotkorlik bilan)
 Pullik narx yoqmasa, **Web Service** + **Free** tarifini sinab ko'rsa bo'ladi: Dastur `PORT` da kichik "ok" javob beradi. Lekin bepul xizmat bir muddat so'rov kelmasa uxlab qoladi, shuning uchun uni tashqi "uptime" xizmati (masalan uptimerobot.com, har 5 daqiqada sizning `https://jarvis-lite.onrender.com` manzilingizga murojaat qiladi) uyg'oq tutishi kerak.
 Bu ishonchsizroq: uxlab turgan paytda kelgan xabar javobsiz qolishi mumkin. Menga **pullik Worker** ishonchliroq tuyuladi.
+
+## Muhammad Akam va server to'lovi
+`PAY_CARD` qo'yilsa: **Muhammad Akam** (faqat Telegram kontaktlaringizda saqlangan bo'lsa) karta raqamini so'rasa — karta raqami va 13$ yuboriladi; faqat summani so'rasa — "13$"; boshqa narsa yozsa — sizga xabar keladi (va oddiy avto-javob ketadi). Boshqa kontaktlar karta so'rasa, hech qachon berilmaydi, sizga xabar keladi.
 
 ## Sinash
 Brother'dan savol yozishini so'rang: taxminan 4 daqiqadan keyin javob kelishi, oxirida "🤖 Jarvis (avto-javob)" belgisi bo'lishi kerak. **Mac'dagi Jarvis o'chiq bo'lsin** (yoki `AUTOREPLY_ENABLED = False`), aks holda ikki marta javob oladi.
