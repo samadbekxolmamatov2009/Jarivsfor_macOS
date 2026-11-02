@@ -48,6 +48,15 @@ Bu ishonchsizroq: uxlab turgan paytda kelgan xabar javobsiz qolishi mumkin. Meng
 ## Muhammad Akam va server to'lovi
 `PAY_CARD` qo'yilsa: **Muhammad Akam** (faqat Telegram kontaktlaringizda saqlangan bo'lsa) karta raqamini so'rasa — karta raqami va 13$ yuboriladi; faqat summani so'rasa — "13$"; boshqa narsa yozsa — sizga xabar keladi (va oddiy avto-javob ketadi). Boshqa kontaktlar karta so'rasa, hech qachon berilmaydi, sizga xabar keladi.
 
+## Botga o'zingiz yozing (Claude tushunadi)
+Bot yuborgan xabarga **javob (reply)** qilib, oddiy so'z bilan yozing, masalan:
+- «bunga javob berishni xohlamayman» → shu odam haqida eslatmalar o'chadi
+- «oziga aytib qo'y, chiroyli ravishda» → bot unga nazokatli xabar yozadi (oxirida «🤖 Jarvis (avto-javob)» belgisi) va nima yuborganini sizga ko'rsatadi
+- «ertaga javob beraman deb ayt» → shunday xabar ketadi
+
+2-3 ta qisqa xabar ketma-ket yozsangiz, bot ularni birga o'qiydi. Reply qilmasangiz, eng oxirgi xabar bergan odam haqida deb tushunadi. Tushunmasa, nima deb yozishini so'raydi, o'zboshimcha hech narsa yubormaydi. Oddiy «yo'q» (yoki `/skip`) — hamma eslatmalarni o'chiradi.
+Bot odamga faqat o'zingiz aytgan narsani yozadi: va'da bermaydi, sana/pul qo'shmaydi.
+
 ## Sinash
 Brother'dan savol yozishini so'rang: taxminan 4 daqiqadan keyin javob kelishi, oxirida "🤖 Jarvis (avto-javob)" belgisi bo'lishi kerak. **Mac'dagi Jarvis o'chiq bo'lsin** (yoki `AUTOREPLY_ENABLED = False`), aks holda ikki marta javob oladi.
 
