@@ -32,7 +32,8 @@ Oxirida **bitta uzun qator** chiqadi — bu `TG_SESSION`. Uni nusxalang (Cmd+C).
 | `ANTHROPIC_API_KEY` | Claude kaliti (`sk-ant-...`) |
 | `INFO` | `Men kimman: Zufarbek Jumayev, 18 yoshdaman, dasturchiman.;Nima qilaman: har qanday dasturlarni yozaman. IT (dasturlash) fanidan dars ham o'taman.` (qatorlar `;` bilan ajratiladi; o'zingiz haqingizda faktlar — shaxsiy ma'lumot GitHub'da emas, faqat shu yerda turadi) |
 | `PYTHON_VERSION` | `3.12.7` (qurish (build) Python versiyasi bilan xato bersa) |
-| `NOTIFY_BOT_TOKEN`, `NOTIFY_CHAT_ID` | ixtiyoriy: telefonga bildirishnoma (bo'lmasa xabarlar Telegram'dagi "Saved Messages"ga tushadi, bildirishnoma bermaydi) |
+| `NOTIFY_BOT_TOKEN` | Jarvis botingiz tokeni (BotFather bergan). Bot sizga **faqat zarur paytda** yozadi: sizning javobingiz kerak bo'lsa, ovozli xabar/fayl kelsa, pul/parol kabi mavzu yoki chegaradan oshsa, Muhammad Akam karta so'rasa. Chat id kerak emas (o'z akkauntingizga yozadi), faqat botda bir marta Start bosilgan bo'lishi kerak. Qo'ymasangiz xabarlar "Saved Messages"ga tushadi (bildirishnoma bermaydi). |
+| `NOTIFY_ALL_REPLIES` | ixtiyoriy: `1` qo'ysangiz botga har bir javob nusxasi ham keladi (tayyor holda o'chiq) |
 | `PAY_CARD` | **Muhammad Akam** uchun: karta raqamingiz (16 xona, bo'shliqlar bilan). U faqat shu yerda turadi, kodda/GitHub'da emas. Bo'sh qoldirsangiz bu qoida o'chiq. |
 | `PAY_AMOUNT`, `PAY_FOR`, `PAY_CONTACT` | ixtiyoriy (tayyor qiymatlari: `13$`, `cefr tys boti serveri`, `Muhammad Akam`) |
 | `CONTACTS` | ixtiyoriy: `Brother;Otabek Akam;@username` — bo'sh qoldirsangiz tayyor ro'yxat ishlaydi (Brother, NAVOIY-QORAKO'L O'QUV MARKAZI, Otabek Akam, Muhammad Akam, Javohir Aka) |

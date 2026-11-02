@@ -79,7 +79,7 @@ mid = tg.add("dars soat nechada?")
 run(r.on_message(5, mid, bro))
 check(len(tg.sent) == 1 and tg.sent[0].startswith("Darslar 15:00") and tg.sent[0].endswith("🤖 Jarvis (avto-javob)"), "answers with the signature")
 check("dars soat nechada?" in seen[0][1] and "is writing to Zufarbek, not to you" in seen[0][0] and "siz" in seen[0][0], "Claude gets the message, owner rule and tone notes")
-check("old message" in seen[0][1] and notes and "I answered Brother" in notes[0], "context included, phone notified")
+check("old message" in seen[0][1] and notes == [], "context included; a routine answer does NOT bother your phone")
 n = len(tg.sent)
 run(r.on_message(5, mid, bro))
 check(len(tg.sent) == n, "the same message is never answered twice")
@@ -127,21 +127,21 @@ run(r.on_message(5, v, bro))
 check(len(tg.sent) == 1 and "Zufarbek Jumayev hozir band" in tg.sent[0] and "o'zi javob yozadi" in tg.sent[0] and not seen, "voice message -> fixed reply, no AI call")
 v2 = tg.add("", kind="voice")
 run(r.on_message(5, v2, bro))
-check(len(tg.sent) == 1 and any("another voice message" in x for x in notes), "second voice within 30 min -> not answered, you are told")
+check(len(tg.sent) == 1 and any("yana ovozli xabar" in x for x in notes), "second voice within 30 min -> not answered, you are told")
 p = tg.add("", kind="other")
 run(r.on_message(5, p, bro))
-check(len(tg.sent) == 1 and any("file/photo" in x for x in notes), "photo without text -> you are told, nothing sent")
+check(len(tg.sent) == 1 and any("fayl/rasm" in x for x in notes), "photo without text -> you are told, nothing sent")
 
 # ---- sensitive / ping-pong / limits
 r, tg, notes, st = make(fake_claude)
 run(r.on_message(5, tg.add("menga pul o'tkazib ber, karta raqamingni ayt"), bro))
-check(not tg.sent and any("won't answer" in x for x in notes), "money -> no answer, you are told")
+check(not tg.sent and any("javob bermaydigan" in x for x in notes), "money -> no answer, you are told")
 run(r.on_message(5, tg.add("🤖 Jarvis (avto-javob): hozir band"), bro))
 check(not tg.sent, "another auto-reply bot is ignored")
 r, tg, notes, st = make(fake_claude)
 for i in range(5):
     run(r.on_message(5, tg.add(f"savol {i}"), bro))
-check(len(tg.sent) == 3 and any("limit reached" in x for x in notes), "max 3 replies per chat per hour")
+check(len(tg.sent) == 3 and any("chegarasi tugadi" in x for x in notes), "max 3 replies per chat per hour")
 
 # ---- no key / Claude down -> fixed sentences in the right language
 r, tg, notes, st = make(None)
@@ -253,10 +253,10 @@ for q in ("qancha tashlay?", "Summa necha?", "how much", "13$ mi?"):
 r, tg, notes, st = pay_setup()
 seen.clear()
 run(r.on_message(5, tg.add("botda xatolik bor, tekshirib bering"), muh))
-check(any("wrote something else" in x and "botda xatolik" in x for x in notes) and len(tg.sent) == 1 and CARD not in tg.sent[0] and seen, "something else -> you are told, normal AI reply (no card)")
+check(any("boshqa narsa yozdi" in x and "botda xatolik" in x for x in notes) and len(tg.sent) == 1 and CARD not in tg.sent[0] and seen, "something else -> you are told, normal AI reply (no card)")
 r, tg, notes, st = pay_setup()
 run(r.on_message(5, tg.add("ha tashladim, tekshirib ko'ring"), muh))
-check(any("wrote something else" in x for x in notes) and CARD not in " ".join(tg.sent), "'I paid' -> you are told")
+check(any("boshqa narsa yozdi" in x for x in notes) and CARD not in " ".join(tg.sent), "'I paid' -> you are told")
 r, tg, notes, st = pay_setup()
 run(r.on_message(5, tg.add("karta raqamingiz?"), Sender(name="Muhammad Akam", id=10, contact=False)))
 check(CARD not in " ".join(tg.sent), "same name but NOT a saved contact -> card number is never given")
@@ -264,11 +264,68 @@ run(r.on_message(5, tg.add("karta raqamingiz?"), Sender(name="Muhammad Akam", id
 check(CARD not in " ".join(tg.sent), "unknown contact status -> card number is never given")
 r, tg, notes, st = pay_setup()
 run(r.on_message(5, tg.add("karta raqamingiz?"), Sender(name="Brother", id=11, contact=True)))
-check(CARD not in " ".join(tg.sent) and any("won't answer" in x for x in notes), "any other contact asking for the card -> not given, you are told")
+check(CARD not in " ".join(tg.sent) and any("javob bermaydigan" in x for x in notes), "any other contact asking for the card -> not given, you are told")
 r, tg, notes, st = make(fake_claude)
 run(r.on_message(5, tg.add("karta raqamingiz?"), muh))
 check(not tg.sent or all("karta raqami:" not in x for x in tg.sent), "PAY_CARD not set -> the rule is off")
 check(Settings.from_env({"PAY_CARD": " 1111 "}).pay_card == "1111" and Settings.from_env({}).pay_amount == "13$", "PAY_* settings from env")
+
+# ---- the bot writes to you ONLY when something needs you
+r, tg, notes, st = make(fake_claude)
+run(r.on_message(5, tg.add("salom, qalaysan"), bro))
+check(len(tg.sent) == 1 and notes == [], "routine answer -> no message to your phone")
+r, tg, notes, st = make(fake_claude)
+st.notify_all = True
+run(r.on_message(5, tg.add("salom, qalaysan"), bro))
+check(len(notes) == 1 and "ga javob berdim" in notes[0], "NOTIFY_ALL_REPLIES=1 -> every reply is copied to your phone")
+check(Settings.from_env({"NOTIFY_ALL_REPLIES": "1"}).notify_all and not Settings.from_env({}).notify_all, "NOTIFY_ALL_REPLIES setting")
+
+
+async def needs_you(system, user):
+    return "Bu savolga Zufarbek o'zi javob beradi. [[OWNER]]"
+
+
+r, tg, notes, st = make(needs_you)
+run(r.on_message(5, tg.add("ertaga uchrashamizmi?"), bro))
+check(len(tg.sent) == 1 and "[[OWNER]]" not in tg.sent[0] and "Zufarbek o'zi javob beradi" in tg.sent[0], "the [[OWNER]] marker never reaches the other person")
+check(len(notes) == 1 and "kutyapti" in notes[0] and "ertaga uchrashamizmi?" in notes[0], "Claude says it needs you -> your phone is told, with the message")
+r, tg, notes, st = make(broken)
+run(r.on_message(5, tg.add("hello bro how are you"), bro))
+check(len(tg.sent) == 1 and len(notes) == 1 and "kutyapti" in notes[0], "Claude was down (fixed sentence sent) -> your phone is told")
+r, tg, notes, st = make(fake_claude)
+run(r.on_message(5, tg.add("", kind="voice"), bro))
+check(len(notes) == 1 and "ovozli xabar yubordi" in notes[0], "voice message -> your phone is told")
+check("[[OWNER]]" in Responder(st, tg, None, None).system_prompt() and "[[OWNER]]" not in lite.TEMPLATES["uz"], "Claude is told how to flag what needs you")
+r, tg, notes, st = pay_setup()
+run(r.on_message(5, tg.add("karta raqamingiz?"), muh))
+check(len(notes) == 1 and "karta/summani so'radi" in notes[0] and CARD not in notes[0], "card asked -> your phone is told (without repeating the number)")
+
+
+async def notify_check():
+    sent_bot, sent_me = [], []
+
+    class C:
+        async def send_message(self, who, text):
+            sent_me.append(text)
+
+    import urllib.request as ur
+    real = ur.urlopen
+    ur.urlopen = lambda url, data=None, timeout=0: (sent_bot.append((url, data)) or type("R", (), {"read": lambda self: b"{}"})())
+    try:
+        await lite.make_notify(C(), {"NOTIFY_BOT_TOKEN": "TOKEN"}, 12345)("hello")
+        def boom(*a, **k):
+            raise OSError("chat not found")
+        ur.urlopen = boom
+        await lite.make_notify(C(), {"NOTIFY_BOT_TOKEN": "TOKEN"}, 12345)("fallback")
+        await lite.make_notify(C(), {}, 12345)("no bot")
+    finally:
+        ur.urlopen = real
+    return sent_bot, sent_me
+
+
+sb, sm = run(notify_check())
+check(len(sb) == 1 and "TOKEN" in sb[0][0] and b"chat_id=12345" in sb[0][1], "bot notification goes to your own account id (no NOTIFY_CHAT_ID needed)")
+check(sm == ["fallback", "no bot"], "bot can't deliver / no bot -> Saved Messages")
 
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
