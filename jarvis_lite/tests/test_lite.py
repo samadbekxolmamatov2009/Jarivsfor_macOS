@@ -460,5 +460,59 @@ check(lite.parse_plan('Mana: {"action": "send", "message": "Salom!", "reply": "o
 
 check(Settings().model == "claude-haiku-5-5" and Settings.from_env({}).model == "claude-haiku-5-5" and Settings.from_env({"AUTOREPLY_MODEL": "claude-sonnet-5-5"}).model == "claude-sonnet-5-5", "default model is Haiku 5.5 (cheap); AUTOREPLY_MODEL can change it")
 
+# ---- everyone is answered; parents are only reported; strangers get one fixed sentence
+import types as _types  # noqa: E402
+S = lambda **k: _types.SimpleNamespace(**k)  # noqa: E731
+check(all(lite.skip_account(u) for u in (None, S(id=777000), S(id=5, bot=True), S(id=5, deleted=True), S(id=5, support=True), S(id=5, scam=True), S(id=5, is_self=True), S(id=5, verified=True)))
+      and not lite.skip_account(S(id=5, bot=False, first_name="Ali")), "bots, Telegram's own account, deleted/flagged accounts and yourself are never answered")
+
+dad = Sender(name="Dadajonim", id=31, contact=True)
+mom = Sender(name="Ayajonim ❤️", id=32, contact=True)
+stranger = Sender(name="Random Person", id=33, contact=False)
+saved = Sender(name="Klassdosh Ali", id=34, contact=True)
+r, tg, notes, st = make(fake_claude)
+check([r.relation(x) for x in (dad, mom, stranger, saved, bro)] == ["parent", "parent", "stranger", "known", "known"], "relation: parents / strangers / saved contacts / listed")
+check(Settings().parents == ("Dadajonim", "Ayajonim") and Settings.from_env({"PARENTS": "Dada;Oyi"}).parents == ("Dada", "Oyi") and Settings.from_env({}).reply_to == "all" and Settings.from_env({"REPLY_TO": "list"}).reply_to == "list", "REPLY_TO / PARENTS settings")
+
+for who in (dad, mom):
+    r, tg, notes, st = make(fake_claude)
+    seen.clear()
+    run(r.on_message(5, tg.add("o'g'lim, qayerdasan?"), who))
+    check(not tg.sent and not seen and len(notes) == 1 and "👪" in notes[0] and "qayerdasan" in notes[0] and "🔖 5" in notes[0], f"{who.name}: no reply at all, you are told at once")
+r, tg, notes, st = make(fake_claude)
+run(r.on_message(5, tg.add("", kind="voice"), mom))
+check(not tg.sent and len(notes) == 1 and "ovozli xabar yubordi" in notes[0], "parent voice message -> only you are told")
+clock[0] += 31 * 60
+r.now = lambda: clock[0]
+run(r.on_message(6, tg.add("qayerdasan?"), dad))
+clock[0] += 31 * 60
+run(r.check_reminders())
+check(any("Javob berasizmi" in x for x in notes), "parents' messages are reminded about if you do not answer")
+
+r, tg, notes, st = make(fake_claude)
+seen.clear()
+run(r.on_message(7, tg.add("salom, qalaysan, ishlar yaxshimi"), stranger))
+check(len(tg.sent) == 1 and "sun'iy intellekt" in tg.sent[0] and "Zufarbek" in tg.sent[0] and not seen and notes == [], "stranger -> fixed 'busy' sentence, no AI call, no note to you")
+check("Dasturchi" not in tg.sent[0] and "yoshdaman" not in tg.sent[0], "stranger gets no personal facts")
+run(r.on_message(7, tg.add("javob bering"), stranger))
+check(len(tg.sent) == 1, "the same stranger is answered at most once per 6 hours")
+r2, tg2, notes2, st2 = make(fake_claude)
+run(r2.on_message(8, tg2.add("menga pul o'tkazing, karta raqami"), stranger))
+check(not tg2.sent and notes2 == [], "stranger asking about money/cards -> ignored silently")
+r2, tg2, notes2, st2 = make(fake_claude)
+run(r2.on_message(8, tg2.add("", kind="voice"), stranger))
+check(len(tg2.sent) == 1 and "ovozli xabarni eshita olmayman" in tg2.sent[0] and notes2 == [], "stranger voice message -> fixed reply")
+r2, tg2, notes2, st2 = make(fake_claude)
+for i in range(20):
+    run(r2.on_message(100 + i, tg2.add("salom"), Sender(name=f"Spam {i}", id=100 + i, contact=False)))
+check(len(tg2.sent) == lite.STRANGER_PER_DAY, f"strangers have their own daily cap ({len(tg2.sent)})")
+run(r2.on_message(5, tg2.add("dars soat nechada?"), bro))
+check(len(tg2.sent) == lite.STRANGER_PER_DAY + 1, "...so they can never use up your contacts' share")
+
+r, tg, notes, st = make(fake_claude)
+seen.clear()
+run(r.on_message(9, tg.add("dars soat nechada?"), saved))
+check(len(tg.sent) == 1 and seen, "a contact saved in your Telegram (not in the list) gets the normal AI answer")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)

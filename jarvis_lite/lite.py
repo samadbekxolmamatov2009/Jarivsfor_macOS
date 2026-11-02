@@ -55,6 +55,7 @@ TAG = re.compile(r"🔖\s*(-?\d+)")                # every note to your phone en
 OWNER_MARK = "[[OWNER]]"            # Claude adds it when only the owner can answer; it never reaches the other person
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
 PER_CHAT_HOUR, PER_DAY, VOICE_GAP = 3, 40, 1800
+STRANGER_PER_DAY = 15                 # strangers have their own small allowance, so they can never use up your contacts' share
 
 
 def norm(s):
@@ -88,6 +89,8 @@ class Settings:
     pay_for: str = "cefr tys boti serveri"
     remind_after: float = 1800.0     # REMIND_MINUTES=30: still no answer from you? the bot reminds you
     remind_times: int = 2            # REMIND_TIMES=2: how many reminders at most, then it stops
+    reply_to: str = "all"            # REPLY_TO=all: any private chat (not groups/channels/bots) | list: only people in CONTACTS
+    parents: tuple = ("Dadajonim", "Ayajonim")   # PARENTS="Dadajonim;Ayajonim": never answered by Jarvis, only reported to you
     notify_all: bool = False         # NOTIFY_ALL_REPLIES=1: copy EVERY reply to your phone (default: only what needs you)
 
     @classmethod
@@ -101,6 +104,8 @@ class Settings:
                    pay_contact=env.get("PAY_CONTACT", "Muhammad Akam"), pay_card=env.get("PAY_CARD", "").strip(),
                    pay_amount=env.get("PAY_AMOUNT", "13$"), pay_for=env.get("PAY_FOR", "cefr tys boti serveri"),
                    notify_all=env.get("NOTIFY_ALL_REPLIES", "").lower() in ("1", "true", "yes"),
+                   reply_to=env.get("REPLY_TO", "all").lower(),
+                   parents=tuple(env_lines(env["PARENTS"])) if "PARENTS" in env else ("Dadajonim", "Ayajonim"),
                    remind_after=float(env.get("REMIND_MINUTES", "30")) * 60, remind_times=int(env.get("REMIND_TIMES", "2")))
 
 
@@ -131,6 +136,13 @@ def read_lines(path):
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+TELEGRAM_SERVICE_ID = 777000            # Telegram's own account (login codes, security notices)
+
+
+def skip_account(u):
+    """Accounts Jarvis must never answer: bots, Telegram's own/service/support accounts, deleted or flagged accounts, yourself."""
+    return (u is None or getattr(u, "id", 0) == TELEGRAM_SERVICE_ID
+            or any(getattr(u, f, False) is True for f in ("bot", "is_self", "deleted", "support", "scam", "fake", "verified")))
 
 
 def env_lines(value):
@@ -179,6 +191,7 @@ class Responder:
         self.busy, self.dirty = set(), set()
         self.pending = {}                       # chat -> things waiting for YOUR answer (for the reminders)
         self.now = time.time
+        self.stranger_sent, self.stranger_day = defaultdict(deque), deque()
         self.names, self.last_chat = {}, None   # whom the latest notes were about
         self.owner_buf, self.owner_busy = [], False
         self.owner_hist = deque(maxlen=10)      # your conversation with the bot (so "oziga ayt" after "javob bermayman" works)
@@ -218,6 +231,11 @@ class Responder:
             return                                          # another auto-reply bot: never chat with it
         name = sender.name or "Friend"
         now = time.time()
+        rel = self.relation(sender)
+        if rel == "parent":
+            return await self.handle_parent(chat, name, new, texts)
+        if rel == "stranger":
+            return await self.handle_stranger(chat, name, new, texts, now)
         if not texts:
             if any(m.kind == "voice" for m in new):
                 return await self.voice(chat, name, now)
@@ -242,6 +260,50 @@ class Responder:
             return await self.attention(chat, name, text, f"ℹ️ {name} yozdi, yaxshi javob topolmadim — o'zingiz javob bering:\n{text[:300]}")
         await self.deliver(chat, name, text, reply,
                            tell=f"🙋 {name} sizning o'zingiz javob berishingizni kutyapti." if needs_owner else "")
+
+    # ---- who is writing
+    def relation(self, sender):
+        """'parent' (only reported to you) | 'known' (listed in CONTACTS or saved in your Telegram contacts) | 'stranger'."""
+        n = norm(sender.name)
+        if n and any(norm(p) and norm(p) in n for p in self.s.parents):
+            return "parent"
+        if allowed(sender, get_contacts(self.s)) or sender.contact is True:
+            return "known"
+        return "stranger"
+
+    async def handle_parent(self, chat, name, new, texts):
+        """Dad / Mom: Jarvis never writes to them. You are told at once (and reminded if you do not answer)."""
+        if texts:
+            text = "\n".join(texts)
+            return await self.attention(chat, name, text, f"👪 {name} yozdi — o'zingiz javob bering:\n{text[:300]}")
+        if any(m.kind == "voice" for m in new):
+            return await self.attention(chat, name, "(ovozli xabar)", f"🎤 {name} ovozli xabar yubordi — o'zingiz eshiting.")
+        return await self.attention(chat, name, "(fayl/rasm)", f"📎 {name} fayl/rasm yubordi — o'zingiz ko'ring.")
+
+    def stranger_budget(self, chat, now):
+        q = self.stranger_sent[chat]
+        while q and now - q[0] > 6 * 3600:
+            q.popleft()
+        while self.stranger_day and now - self.stranger_day[0] > 86400:
+            self.stranger_day.popleft()
+        return not q and len(self.stranger_day) < STRANGER_PER_DAY
+
+    async def handle_stranger(self, chat, name, new, texts, now):
+        """Someone who is neither listed nor saved: one fixed 'busy' sentence, no AI, no personal facts, no notes to you."""
+        if not self.stranger_budget(chat, now):
+            return
+        if texts:
+            text = "\n".join(texts)
+            if SENSITIVE.search(text):
+                return                                       # money / codes / emergencies: never engage with strangers
+            code = detect_lang(text)
+            reply = TEMPLATES["en" if self.s.lang_mode == "en" else code if code in TEMPLATES else "en"].format(owner=self.s.owner)
+            incoming = text
+        elif any(m.kind == "voice" for m in new):
+            reply, incoming = VOICE_REPLY.format(owner_full=self.s.owner_full), "🎤 (ovozli xabar)"
+        else:
+            return
+        await self.deliver(chat, name, incoming, reply, stranger=True)
 
     # ---- the payment rule: only for ONE named contact, only if he is saved in your Telegram contacts, only if PAY_CARD is set
     def pay_applies(self, sender):
@@ -396,14 +458,18 @@ class Responder:
         self.pending.clear()
         return n
 
-    async def deliver(self, chat, name, incoming, reply, tell="", shown=None, attn=True):
+    async def deliver(self, chat, name, incoming, reply, tell="", shown=None, attn=True, stranger=False):
         """Sends the answer. Your phone hears about it only when `tell` is given (something needs you)
         — or for every reply if NOTIFY_ALL_REPLIES=1."""
         mid = await self.tg.send(chat, f"{reply}\n\n{SIGNATURE}")
         self.our_ids.add(mid)
-        self.sent[chat].append(time.time())
-        self.day.append(time.time())
-        self.log(f"🤖 answered {name}")
+        if stranger:
+            self.stranger_sent[chat].append(time.time())
+            self.stranger_day.append(time.time())
+        else:
+            self.sent[chat].append(time.time())
+            self.day.append(time.time())
+        self.log(f"🤖 answered {name}" + (" (stranger)" if stranger else ""))
         if tell or self.s.notify_all:
             msg = f"{tell or f'🤖 {name} ga javob berdim.'}\n\n{name}: {incoming[:300]}\nMen: {reply if shown is None else shown}"
             if tell and attn:
@@ -590,11 +656,11 @@ async def amain(cmd):
         if not event.is_private:
             return
         u = await event.get_sender()
-        if u is None or getattr(u, "bot", False) or getattr(u, "is_self", False):
+        if skip_account(u):                                   # bots, Telegram's own account, deleted/flagged accounts, yourself
             return
         sender = Sender(name=" ".join(x for x in (u.first_name, u.last_name) if x), username=u.username or "",
                         phone=u.phone or "", id=u.id, contact=getattr(u, "contact", None))
-        if allowed(sender, get_contacts(settings)):
+        if settings.reply_to == "all" or responder.relation(sender) != "stranger":
             asyncio.create_task(responder.on_message(event.chat_id, event.message.id, sender))
 
     token = env.get("NOTIFY_BOT_TOKEN", "")

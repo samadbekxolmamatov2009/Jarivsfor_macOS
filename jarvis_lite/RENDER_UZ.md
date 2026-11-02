@@ -36,6 +36,8 @@ Oxirida **bitta uzun qator** chiqadi — bu `TG_SESSION`. Uni nusxalang (Cmd+C).
 | `REMIND_MINUTES`, `REMIND_TIMES` | ixtiyoriy (tayyor: `30` va `2`): muhim xabarga o'zingiz javob bermasangiz, bot 30 daqiqadan keyin «Javob berasizmi?» deb eslatadi (ko'pi bilan 2 marta). Javob berishni xohlamasangiz botga **«yo'q»** deb yozing — eslatmalar to'xtaydi. O'zingiz odamga javob yozsangiz ham eslatma to'xtaydi. |
 | `NOTIFY_ALL_REPLIES` | ixtiyoriy: `1` qo'ysangiz botga har bir javob nusxasi ham keladi (tayyor holda o'chiq) |
 | `AUTOREPLY_MODEL` | ixtiyoriy (tayyor: `claude-haiku-5-5`, juda arzon). O'zbekcha javob sifati yetmasa `claude-sonnet-5-5` (~20 baravar qimmatroq) qo'ying. |
+| `PARENTS` | ixtiyoriy (tayyor: `Dadajonim;Ayajonim`): bu odamlarga Jarvis **hech qachon yozmaydi**, faqat sizga botdan xabar beradi. Ro'yxatni `;` bilan o'zgartirasiz. |
+| `REPLY_TO` | ixtiyoriy (tayyor: `all`). `list` qo'ysangiz faqat `CONTACTS` ro'yxatidagilarga javob beradi. |
 | `PAY_CARD` | **Muhammad Akam** uchun: karta raqamingiz (16 xona, bo'shliqlar bilan). U faqat shu yerda turadi, kodda/GitHub'da emas. Bo'sh qoldirsangiz bu qoida o'chiq. |
 | `PAY_AMOUNT`, `PAY_FOR`, `PAY_CONTACT` | ixtiyoriy (tayyor qiymatlari: `13$`, `cefr tys boti serveri`, `Muhammad Akam`) |
 | `CONTACTS` | ixtiyoriy: `Brother;Otabek Akam;@username` — bo'sh qoldirsangiz tayyor ro'yxat ishlaydi (Brother, NAVOIY-QORAKO'L O'QUV MARKAZI, Otabek Akam, Muhammad Akam, Javohir Aka) |
@@ -45,6 +47,14 @@ Oxirida **bitta uzun qator** chiqadi — bu `TG_SESSION`. Uni nusxalang (Cmd+C).
 ## Bepul variant (ehtiyotkorlik bilan)
 Pullik narx yoqmasa, **Web Service** + **Free** tarifini sinab ko'rsa bo'ladi: Dastur `PORT` da kichik "ok" javob beradi. Lekin bepul xizmat bir muddat so'rov kelmasa uxlab qoladi, shuning uchun uni tashqi "uptime" xizmati (masalan uptimerobot.com, har 5 daqiqada sizning `https://jarvis-lite.onrender.com` manzilingizga murojaat qiladi) uyg'oq tutishi kerak.
 Bu ishonchsizroq: uxlab turgan paytda kelgan xabar javobsiz qolishi mumkin. Menga **pullik Worker** ishonchliroq tuyuladi.
+
+## Kimga qanday javob beriladi
+| Kim yozsa | Jarvis nima qiladi |
+|---|---|
+| **Dadajonim, Ayajonim** | Umuman yozmaydi. Botdan sizga darrov xabar beradi (ovozli xabar bo'lsa ham). Javob bermasangiz 30 daqiqadan keyin eslatadi. |
+| **Tanishlar** (ro'yxatdagilar va Telegram kontaktlaringizda saqlanganlar) | Claude mazmunga qarab javob beradi (4 daqiqa kutgach), kerak bo'lsa sizga xabar beradi. |
+| **Notanishlar** (har qanday boshqa profil) | Faqat tayyor «band, o'zi javob beradi» jumlasi, AI yo'q, shaxsiy ma'lumot yo'q, sizga xabar yo'q. Bitta odamga 6 soatda 1 marta, jami kuniga 15 tagacha. Pul/karta/parol haqida yozsa — umuman javob yo'q. |
+| **Guruh, kanal, bot, Telegram'ning o'zi (777000), o'chirilgan/belgilangan profillar** | Hech qachon javob berilmaydi. |
 
 ## Muhammad Akam va server to'lovi
 `PAY_CARD` qo'yilsa: **Muhammad Akam** (faqat Telegram kontaktlaringizda saqlangan bo'lsa) karta raqamini so'rasa — karta raqami va 13$ yuboriladi; faqat summani so'rasa — "13$"; boshqa narsa yozsa — sizga xabar keladi (va oddiy avto-javob ketadi). Boshqa kontaktlar karta so'rasa, hech qachon berilmaydi, sizga xabar keladi.
