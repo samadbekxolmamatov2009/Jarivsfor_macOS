@@ -48,6 +48,8 @@ CARD_INTENT = re.compile(
     r"куда\s+(?:скин|перев|отправ)\w*|where\s+(?:to\s+)?(?:send|transfer|pay))", re.I)
 AMOUNT_INTENT = re.compile(
     r"\b(?:qancha|necha\s*(?:pul|dollar|so'm)?|summa\w*|miqdor\w*|narx\w*|how\s+much|сколько|сумм\w*)\b|dollar\w*|\$", re.I)
+# you write this to your bot to say "I will not answer, stop reminding me"
+DISMISS = re.compile(r"\s*/?(?:yo'?q|yoq|нет|no|skip|stop|bekor|keyin)\b", re.I)
 OWNER_MARK = "[[OWNER]]"            # Claude adds it when only the owner can answer; it never reaches the other person
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
 PER_CHAT_HOUR, PER_DAY, VOICE_GAP = 3, 40, 1800
@@ -82,6 +84,8 @@ class Settings:
     pay_card: str = ""               # PAY_CARD="...."  (empty = this special rule is OFF)
     pay_amount: str = "13$"
     pay_for: str = "cefr tys boti serveri"
+    remind_after: float = 1800.0     # REMIND_MINUTES=30: still no answer from you? the bot reminds you
+    remind_times: int = 2            # REMIND_TIMES=2: how many reminders at most, then it stops
     notify_all: bool = False         # NOTIFY_ALL_REPLIES=1: copy EVERY reply to your phone (default: only what needs you)
 
     @classmethod
@@ -94,7 +98,8 @@ class Settings:
                    contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""),
                    pay_contact=env.get("PAY_CONTACT", "Muhammad Akam"), pay_card=env.get("PAY_CARD", "").strip(),
                    pay_amount=env.get("PAY_AMOUNT", "13$"), pay_for=env.get("PAY_FOR", "cefr tys boti serveri"),
-                   notify_all=env.get("NOTIFY_ALL_REPLIES", "").lower() in ("1", "true", "yes"))
+                   notify_all=env.get("NOTIFY_ALL_REPLIES", "").lower() in ("1", "true", "yes"),
+                   remind_after=float(env.get("REMIND_MINUTES", "30")) * 60, remind_times=int(env.get("REMIND_TIMES", "2")))
 
 
 @dataclass
@@ -170,6 +175,8 @@ class Responder:
         self.day = deque()
         self.voice_at = {}
         self.busy, self.dirty = set(), set()
+        self.pending = {}                       # chat -> things waiting for YOUR answer (for the reminders)
+        self.now = time.time
 
     # ---- entry point: called for every incoming private message from an allowed person
     async def on_message(self, chat, msg_id, sender):
@@ -209,7 +216,7 @@ class Responder:
         if not texts:
             if any(m.kind == "voice" for m in new):
                 return await self.voice(chat, name, now)
-            return await self.notify(f"📎 {name} fayl/rasm yubordi (matnsiz) — o'zingiz ko'ring.")
+            return await self.attention(chat, name, "(fayl/rasm)", f"📎 {name} fayl/rasm yubordi (matnsiz) — o'zingiz ko'ring.")
         text = "\n".join(texts)
         if self.pay_applies(sender):                        # the one contact who pays for the bot's server
             kind = self.pay_intent(text)
@@ -218,16 +225,16 @@ class Responder:
                     return await self.notify(f"ℹ️ {name} uchun avto-javob chegarasi tugadi. Xabari:\n{text[:300]}")
                 return await self.deliver(chat, name, text, self.pay_reply(kind),
                                           tell=f"💳 {name} karta/summani so'radi — men yubordim.",
-                                          shown="(karta raqami / summa yuborildi)" if kind == "card" else None)
-            await self.notify(f"💬 {name} ({self.s.pay_for}) boshqa narsa yozdi — ko'ring:\n{text[:300]}")
+                                          shown="(karta raqami / summa yuborildi)" if kind == "card" else None, attn=False)
+            await self.attention(chat, name, text, f"💬 {name} ({self.s.pay_for}) boshqa narsa yozdi — ko'ring:\n{text[:300]}")
         if SENSITIVE.search(text):
-            return await self.notify(f"⚠️ {name} men javob bermaydigan mavzuda yozdi (pul/parol/zudlik) — o'zingiz ko'ring:\n{text[:300]}")
+            return await self.attention(chat, name, text, f"⚠️ {name} men javob bermaydigan mavzuda yozdi (pul/parol/zudlik) — o'zingiz ko'ring:\n{text[:300]}")
         if not self.budget(chat, now):
             return await self.notify(f"ℹ️ {name} uchun avto-javob chegarasi tugadi. Xabari:\n{text[:300]}")
         convo = "\n".join(f"{'Me' if m.out else name}: {m.text[:200]}" for m in msgs if m not in new and m.text)
         reply, needs_owner = await self.compose(name, text, convo)
         if not reply:
-            return await self.notify(f"ℹ️ {name} yozdi, yaxshi javob topolmadim — o'zingiz javob bering:\n{text[:300]}")
+            return await self.attention(chat, name, text, f"ℹ️ {name} yozdi, yaxshi javob topolmadim — o'zingiz javob bering:\n{text[:300]}")
         await self.deliver(chat, name, text, reply,
                            tell=f"🙋 {name} sizning o'zingiz javob berishingizni kutyapti." if needs_owner else "")
 
@@ -268,7 +275,42 @@ class Responder:
             self.day.popleft()
         return len(q) < PER_CHAT_HOUR and len(self.day) < PER_DAY
 
-    async def deliver(self, chat, name, incoming, reply, tell="", shown=None):
+    async def attention(self, chat, name, text, message):
+        """Tells your phone that something needs YOU, and starts the reminder clock for this chat."""
+        await self.notify(message)
+        last_in = self.handled.get(chat, 0)
+        p = self.pending.get(chat)
+        if p:
+            p.update(text=text, last_in=last_in)
+        else:
+            self.pending[chat] = {"name": name, "text": text, "last_in": last_in, "times": 0,
+                                  "next": self.now() + self.s.remind_after}
+
+    async def check_reminders(self):
+        """Called every minute. Nothing from you after 30 minutes -> asks "will you answer?" (at most REMIND_TIMES times)."""
+        now = self.now()
+        for chat, p in list(self.pending.items()):
+            if now < p["next"]:
+                continue
+            msgs = await self.tg.recent(chat, 12)
+            if any(m.out and m.id > p["last_in"] and m.id not in self.our_ids for m in msgs):
+                del self.pending[chat]                       # you answered yourself: nothing to remind
+                continue
+            p["times"] += 1
+            mins = int(self.s.remind_after // 60)
+            await self.notify(f"⏰ {p['name']} {mins} daqiqadan beri javobingizni kutyapti:\n«{p['text'][:300]}»\n\n"
+                              f"Javob berasizmi? Xohlamasangiz shu botga «yo'q» deb yozing — boshqa eslatmayman.")
+            if p["times"] >= self.s.remind_times:
+                del self.pending[chat]
+            else:
+                p["next"] = now + self.s.remind_after
+
+    def dismiss_all(self):
+        n = len(self.pending)
+        self.pending.clear()
+        return n
+
+    async def deliver(self, chat, name, incoming, reply, tell="", shown=None, attn=True):
         """Sends the answer. Your phone hears about it only when `tell` is given (something needs you)
         — or for every reply if NOTIFY_ALL_REPLIES=1."""
         mid = await self.tg.send(chat, f"{reply}\n\n{SIGNATURE}")
@@ -277,7 +319,11 @@ class Responder:
         self.day.append(time.time())
         self.log(f"🤖 answered {name}")
         if tell or self.s.notify_all:
-            await self.notify(f"{tell or f'🤖 {name} ga javob berdim.'}\n\n{name}: {incoming[:300]}\nMen: {reply if shown is None else shown}")
+            msg = f"{tell or f'🤖 {name} ga javob berdim.'}\n\n{name}: {incoming[:300]}\nMen: {reply if shown is None else shown}"
+            if tell and attn:
+                await self.attention(chat, name, incoming, msg)
+            else:
+                await self.notify(msg)
 
     # ---- the text of the answer
     def info(self):
@@ -446,6 +492,24 @@ async def amain(cmd):
                         phone=u.phone or "", id=u.id, contact=getattr(u, "contact", None))
         if allowed(sender, get_contacts(settings)):
             asyncio.create_task(responder.on_message(event.chat_id, event.message.id, sender))
+
+    token = env.get("NOTIFY_BOT_TOKEN", "")
+    bot_id = int(token.split(":")[0]) if token.split(":")[0].isdigit() else None
+
+    @client.on(events.NewMessage(outgoing=True))
+    async def on_out(event):                                  # you write «yo'q» to your bot -> reminders stop
+        if bot_id and event.chat_id == bot_id and DISMISS.match(norm(event.raw_text or "")):
+            n = responder.dismiss_all()
+            await responder.notify(f"✅ Bo'ldi, {n} ta eslatma o'chirildi." if n else "✅ Eslatish uchun hech narsa yo'q edi.")
+
+    async def reminder_loop():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await responder.check_reminders()
+            except Exception as e:
+                print(f"⚠️ reminders: {type(e).__name__}: {str(e)[:100]}", flush=True)
+    asyncio.create_task(reminder_loop())
 
     print(f"🤖 Jarvis Lite is running. Contacts: {len(get_contacts(settings))}  "
           f"Claude: {'on' if env.get('ANTHROPIC_API_KEY') else 'OFF (fixed sentences only)'}", flush=True)
