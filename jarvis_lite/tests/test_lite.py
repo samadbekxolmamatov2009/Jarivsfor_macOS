@@ -458,5 +458,7 @@ run(r.on_owner_message("rahmat"))
 check(not tg.sent and 5 in r.pending, "'thanks' -> nothing happens")
 check(lite.parse_plan('Mana: {"action": "send", "message": "Salom!", "reply": "ok"} tamom')["message"] == "Salom!", "JSON is found inside extra words")
 
+check(Settings().model == "claude-haiku-5-5" and Settings.from_env({}).model == "claude-haiku-5-5" and Settings.from_env({"AUTOREPLY_MODEL": "claude-sonnet-5-5"}).model == "claude-sonnet-5-5", "default model is Haiku 5.5 (cheap); AUTOREPLY_MODEL can change it")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
