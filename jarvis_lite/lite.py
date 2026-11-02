@@ -73,7 +73,7 @@ def clean_reply(text):
 class Settings:
     owner: str = "Zufarbek"
     owner_full: str = "Zufarbek Jumayev"
-    model: str = "claude-sonnet-5-5"
+    model: str = "claude-haiku-5-5"
     lang_mode: str = "auto"          # auto | en | llm
     grace: float = 240.0             # seconds to wait before answering (4 minutes: you may answer yourself meanwhile)
     contacts_file: str = "contacts.txt"
@@ -94,7 +94,7 @@ class Settings:
     def from_env(cls, env=os.environ):
         d = env.get("DATA_DIR", ".")
         return cls(owner=env.get("OWNER_NAME", "Zufarbek"), owner_full=env.get("OWNER_FULL_NAME", "Zufarbek Jumayev"),
-                   model=env.get("AUTOREPLY_MODEL", "claude-sonnet-5-5"), lang_mode=env.get("AUTOREPLY_LANG", "auto").lower(),
+                   model=env.get("AUTOREPLY_MODEL", "claude-haiku-5-5"), lang_mode=env.get("AUTOREPLY_LANG", "auto").lower(),
                    grace=float(env.get("GRACE_SECONDS", "240")), persona=env.get("AUTOREPLY_PERSONA", ""),
                    contacts_file=os.path.join(d, "contacts.txt"), info_file=os.path.join(d, "info.txt"),
                    contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""),
