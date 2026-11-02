@@ -372,7 +372,7 @@ check(r.dismiss_all() == 1 and not r.pending, "«yo'q» to the bot -> reminders 
 clock[0] += 99 * 60
 run(r.check_reminders())
 check(len(notes) == 1, "...and nothing is sent afterwards")
-check(all(lite.DISMISS.match(lite.norm(x)) for x in ("yo'q", "Yo‘q", "/skip", "no", "нет", "bekor qil")) and not lite.DISMISS.match("yoqimli"), "dismiss words")
+check(all(lite.DISMISS.fullmatch(lite.norm(x)) for x in ("yo'q", "Yo‘q", "/skip", "no", "нет", "bekor qil", "yo'q.")) and not any(lite.DISMISS.fullmatch(lite.norm(x)) for x in ("yoqimli", "keyin aytaman", "yo'q, unga ayt", "bunga javob berishni xohlamayman")), "dismiss words are only the WHOLE short message")
 
 r, tg, notes, st = remind_setup(fake_claude)
 run(r.on_message(5, tg.add("salom"), bro))
@@ -384,6 +384,79 @@ r.now = lambda: clock[0]
 run(r.on_message(5, tg.add("karta raqamingiz?"), muh))
 check(not r.pending, "card/amount answers never create reminders")
 check(Settings.from_env({}).remind_after == 1800 and Settings.from_env({}).remind_times == 2 and Settings.from_env({"REMIND_MINUTES": "10", "REMIND_TIMES": "3"}).remind_after == 600, "REMIND_MINUTES / REMIND_TIMES settings")
+
+# ---- you talk to the bot in plain words
+import json as _json  # noqa: E402
+
+
+def owner_setup(plan, **kw):
+    prompts = []
+
+    async def claude_owner(system, user):
+        prompts.append((system, user))
+        return plan if isinstance(plan, str) else _json.dumps(plan)
+
+    r, tg, notes, st = make(claude_owner, **kw)
+    r.now = lambda: clock[0]
+
+    async def yielding(sec):                                   # like the real asyncio.sleep: lets other messages in
+        await asyncio.sleep(0)
+    r.sleep = yielding
+    r.owner_hist.clear()
+    return r, tg, notes, st, prompts
+
+
+nav = Sender(name="NAVOIY-QORAKO'L O'QUV MARKAZI", id=21)
+r, tg, notes, st, prompts = owner_setup({"action": "dismiss_and_send", "message": "Assalomu alaykum! Zufarbek hozir bu masalada javob berolmaydi, tushunganingiz uchun rahmat.", "reply": "ok"})
+tg.add("menga hali ham javob bermadingiz nimaga")
+last = tg.add("menga hali ham javob bermadingiz nimaga")
+run(r.attention(5, nav.name, "menga hali ham javob bermadingiz nimaga", "🙋 NAVOIY kutyapti"))
+check("🔖 5" in notes[0], "every note ends with 🔖 <chat id> (so a reply to it identifies the person)")
+
+
+async def owner_burst():
+    await asyncio.gather(r.on_owner_message("bunga javob berishni xohlamayman", "🙋 NAVOIY kutyapti\n\n🔖 5"),
+                         r.on_owner_message("oziga aytib qoy"), r.on_owner_message("chiroyli ravishda"))
+
+
+sent_before = len(tg.sent)
+run(owner_burst())
+check(len(prompts) == 1 and all(x in prompts[0][1] for x in ("bunga javob berishni xohlamayman", "oziga aytib qoy", "chiroyli ravishda")), "three quick messages -> ONE Claude call that sees all three")
+check("menga hali ham javob bermadingiz" in prompts[0][1] and "NAVOIY-QORAKO'L" in prompts[0][1], "Claude also sees the person's recent messages")
+check(len(tg.sent) == sent_before + 1 and "Zufarbek hozir bu masalada" in tg.sent[-1] and tg.sent[-1].endswith("🤖 Jarvis (avto-javob)"), "the polite message is sent to the person, marked as AI")
+check(5 not in r.pending and any("✅" in x and "yubordim" in x and "Zufarbek hozir bu masalada" in x for x in notes), "reminders stopped, you are shown exactly what was sent")
+check(tg.msgs[-1].id in r.our_ids, "that message counts as the assistant's, not yours")
+
+r, tg, notes, st, prompts = owner_setup({"action": "dismiss", "reply": "ok"})
+run(r.attention(5, nav.name, "savol", "🙋 kutyapti"))
+run(r.on_owner_message("bunga javob berishni xohlamayman"))
+check(not tg.sent and 5 not in r.pending and any("boshqa eslatmayman" in x for x in notes), "'I don't want to answer' -> reminders stop, nothing is sent to the person")
+
+r, tg, notes, st, prompts = owner_setup({"action": "ask", "reply": "Unga nima deb yozay?"})
+run(r.attention(5, nav.name, "savol", "🙋 kutyapti"))
+run(r.on_owner_message("unga yoz"))
+check(not tg.sent and any("Unga nima deb yozay?" in x for x in notes) and 5 in r.pending, "unclear -> the bot asks you, sends nothing")
+
+r, tg, notes, st, prompts = owner_setup({"action": "send", "message": "salom", "reply": ""})
+run(r.on_owner_message("unga salom ayt"))
+check(not prompts and not tg.sent and any("Qaysi odam" in x for x in notes), "no person known -> asks which one, no AI call")
+
+for bad in ("bu JSON emas", '{"action": "delete_everything", "message": "x"}', '{"action": "send", "message": ""}'):
+    r, tg, notes, st, prompts = owner_setup(bad)
+    run(r.attention(5, nav.name, "savol", "🙋 kutyapti"))
+    run(r.on_owner_message("unga ayt"))
+    check(not tg.sent, f"garbled/unknown AI answer {bad[:25]!r} -> nothing is sent")
+
+r, tg, notes, st = make(None)
+run(r.attention(5, nav.name, "savol", "🙋 kutyapti"))
+run(r.on_owner_message("unga ayt"))
+check(not tg.sent and any("AI ishlamayapti" in x for x in notes), "no Claude key -> told, nothing sent")
+
+r, tg, notes, st, prompts = owner_setup({"action": "none", "reply": "Marhamat 🙂"})
+run(r.attention(5, nav.name, "savol", "🙋 kutyapti"))
+run(r.on_owner_message("rahmat"))
+check(not tg.sent and 5 in r.pending, "'thanks' -> nothing happens")
+check(lite.parse_plan('Mana: {"action": "send", "message": "Salom!", "reply": "ok"} tamom')["message"] == "Salom!", "JSON is found inside extra words")
 
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)

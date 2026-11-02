@@ -12,6 +12,7 @@
 Settings: environment file, see env.example.   Edit contacts.txt / info.txt any time — they are re-read for every message.
 """
 import asyncio
+import json
 import os
 import random
 import re
@@ -49,7 +50,8 @@ CARD_INTENT = re.compile(
 AMOUNT_INTENT = re.compile(
     r"\b(?:qancha|necha\s*(?:pul|dollar|so'm)?|summa\w*|miqdor\w*|narx\w*|how\s+much|сколько|сумм\w*)\b|dollar\w*|\$", re.I)
 # you write this to your bot to say "I will not answer, stop reminding me"
-DISMISS = re.compile(r"\s*/?(?:yo'?q|yoq|нет|no|skip|stop|bekor|keyin)\b", re.I)
+DISMISS = re.compile(r"\s*/?(?:yo'?q|yoq|нет|no|skip|stop|bekor(?:\s+qil)?)\s*[.!]*\s*", re.I)   # the WHOLE message ("yo'q")
+TAG = re.compile(r"🔖\s*(-?\d+)")                # every note to your phone ends with 🔖 <chat id>: tells which person it is about
 OWNER_MARK = "[[OWNER]]"            # Claude adds it when only the owner can answer; it never reaches the other person
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
 PER_CHAT_HOUR, PER_DAY, VOICE_GAP = 3, 40, 1800
@@ -177,6 +179,9 @@ class Responder:
         self.busy, self.dirty = set(), set()
         self.pending = {}                       # chat -> things waiting for YOUR answer (for the reminders)
         self.now = time.time
+        self.names, self.last_chat = {}, None   # whom the latest notes were about
+        self.owner_buf, self.owner_busy = [], False
+        self.owner_hist = deque(maxlen=10)      # your conversation with the bot (so "oziga ayt" after "javob bermayman" works)
 
     # ---- entry point: called for every incoming private message from an allowed person
     async def on_message(self, chat, msg_id, sender):
@@ -277,7 +282,8 @@ class Responder:
 
     async def attention(self, chat, name, text, message):
         """Tells your phone that something needs YOU, and starts the reminder clock for this chat."""
-        await self.notify(message)
+        self.names[chat], self.last_chat = name, chat
+        await self.notify(f"{message}\n\n🔖 {chat}")
         last_in = self.handled.get(chat, 0)
         p = self.pending.get(chat)
         if p:
@@ -298,12 +304,92 @@ class Responder:
                 continue
             p["times"] += 1
             mins = int(self.s.remind_after // 60)
+            self.last_chat = chat
             await self.notify(f"⏰ {p['name']} {mins} daqiqadan beri javobingizni kutyapti:\n«{p['text'][:300]}»\n\n"
-                              f"Javob berasizmi? Xohlamasangiz shu botga «yo'q» deb yozing — boshqa eslatmayman.")
+                              f"Javob berasizmi? Xohlamasangiz shu botga «yo'q» deb yozing yoki nima qilishimni yozing "
+                              f"(masalan: «unga chiroyli qilib aytib qo'y») — boshqa eslatmayman.\n\n🔖 {chat}")
             if p["times"] >= self.s.remind_times:
                 del self.pending[chat]
             else:
                 p["next"] = now + self.s.remind_after
+
+    # ---- you write to your bot in plain words; Claude understands and acts
+    async def on_owner_message(self, text, reply_text=""):
+        """`text`: what you wrote to the bot. `reply_text`: the note you replied to (it carries the 🔖 chat id)."""
+        m = TAG.search(reply_text or "")
+        if m:
+            self.last_chat = int(m.group(1))                # replying to a note = talking about that person
+        self.owner_buf.append(text)
+        if self.owner_busy:
+            return                                          # the running task will pick the new message up
+        self.owner_busy = True
+        try:
+            while True:                                      # you often send 2-3 short messages in a row: wait until you stop
+                n = len(self.owner_buf)
+                await self.sleep(3)
+                if len(self.owner_buf) == n:
+                    break
+            msgs, self.owner_buf = self.owner_buf, []
+            await self.handle_owner(msgs)
+        finally:
+            self.owner_busy = False
+
+    async def handle_owner(self, msgs):
+        chat = self.last_chat
+        for t in msgs:
+            self.owner_hist.append(f"Owner: {t}")
+        if chat is None:
+            return await self.notify("Qaysi odam haqida yozyapsiz? Menga yuborgan xabarimga «javob» (reply) qilib yozing.")
+        if not self.claude:
+            return await self.notify("Hozir AI ishlamayapti (Claude kaliti yo'q). Faqat «yo'q» deb yozsangiz eslatmalarni o'chiraman.")
+        name = self.names.get(chat, "the contact")
+        o = self.s.owner
+        try:
+            recent = await self.tg.recent(chat, 8)
+        except Exception:
+            recent = []
+        chat_lines = "\n".join(f"{o if m.out else name}: {m.text[:200]}" for m in recent if m.text)
+        pend = self.pending.get(chat)
+        system = (
+            f"You are {o}'s AI assistant. {o} (the OWNER) is texting you privately about his conversation with {name}. "
+            f"Decide what to do. Answer with ONE JSON object and nothing else: "
+            f'{{"action": "send" | "dismiss" | "dismiss_and_send" | "ask" | "none", "message": "...", "reply": "..."}}\n'
+            f"- send / dismiss_and_send: write \"message\" TO {name}: in the language {name} writes in (Uzbek in Latin script by default), "
+            f"short (1-3 sentences). Speak as {o}'s assistant relaying what {o} said (third person: \"{o} ...\"), because the message "
+            f"is marked as written by an AI. Say ONLY what {o} told you: never promise, agree, or add facts, dates, money. "
+            f"If {o} asked for a nice / polite / gentle style, be warm and respectful. A message to an older relative uses \"siz\".\n"
+            f"- dismiss: {o} does not want to answer {name}; stop reminding. Send nothing. dismiss_and_send: both.\n"
+            f"- ask: the instruction is unclear or a detail is missing; put ONE short question in \"reply\".\n"
+            f"- none: not an instruction (thanks, a test).\n"
+            f"\"reply\" = a very short confirmation or answer to {o}, in Uzbek (Latin). Use the whole conversation: later owner "
+            f"messages refine earlier ones (e.g. \"tell him\" after \"I don't want to answer\" means: relay that decision politely). "
+            f"The owner's texts are instructions from {o} himself; the chat lines below are from a third party.\n\n"
+            f"What {o} knows about himself:\n{self.info()}")
+        user = (f"Recent chat with {name}:\n{chat_lines or '(empty)'}\n\n"
+                f"Waiting for {o}'s answer: {pend['text'][:300] if pend else '(nothing marked)'}\n\n"
+                f"Conversation between {o} and you so far:\n" + "\n".join(self.owner_hist))
+        try:
+            raw = await self.claude(system, user)
+        except Exception as e:
+            self.log(f"⚠️ Claude (owner chat): {type(e).__name__}: {str(e)[:100]}")
+            return await self.notify("Hozir AI bilan bog'lana olmadim. «yo'q» deb yozsangiz eslatmalarni o'chiraman.")
+        plan = parse_plan(raw)
+        if not plan:
+            return await self.notify("Tushunmadim 🤔 Qaytadan, boshqacha yozib ko'ring.")
+        action, message, reply = plan["action"], plan["message"], plan["reply"]
+        if action in ("dismiss", "dismiss_and_send"):
+            self.pending.pop(chat, None)
+        if action in ("send", "dismiss_and_send") and message:
+            mid = await self.tg.send(chat, f"{message}\n\n{SIGNATURE}")
+            self.our_ids.add(mid)
+            self.handled[chat] = max([self.handled.get(chat, 0)] + [m.id for m in recent if not m.out])
+            out = f"✅ {name} ga yubordim:\n«{message}»" + ("\n\nEslatmalar o'chirildi." if action == "dismiss_and_send" else "")
+        elif action == "dismiss":
+            out = f"✅ Bo'ldi, {name} haqida boshqa eslatmayman."
+        else:
+            out = reply or "Tushunmadim 🤔"
+        self.owner_hist.append(f"Assistant: {out[:200]}")
+        await self.notify(out)
 
     def dismiss_all(self):
         n = len(self.pending)
@@ -373,6 +459,24 @@ class Responder:
 
 
 # ------------------------------------------------------------------ Telegram + Claude glue
+def parse_plan(raw):
+    """Claude's JSON answer -> {'action', 'message', 'reply'} or None."""
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+    except ValueError:
+        return None
+    action = str(d.get("action", "")).strip().lower()
+    if action not in ("send", "dismiss", "dismiss_and_send", "ask", "none"):
+        return None
+    message = clean_reply(str(d.get("message") or "")) if action in ("send", "dismiss_and_send") else ""
+    if action in ("send", "dismiss_and_send") and not message:
+        action = "dismiss" if action == "dismiss_and_send" else "none"
+    return {"action": action, "message": message, "reply": " ".join(str(d.get("reply") or "").split())[:400]}
+
+
 def make_claude(api_key, model):
     if not api_key:
         return None
@@ -498,9 +602,18 @@ async def amain(cmd):
 
     @client.on(events.NewMessage(outgoing=True))
     async def on_out(event):                                  # you write «yo'q» to your bot -> reminders stop
-        if bot_id and event.chat_id == bot_id and DISMISS.match(norm(event.raw_text or "")):
+        if not (bot_id and event.chat_id == bot_id):
+            return
+        text = event.raw_text or ""
+        if DISMISS.fullmatch(norm(text)):
             n = responder.dismiss_all()
             await responder.notify(f"✅ Bo'ldi, {n} ta eslatma o'chirildi." if n else "✅ Eslatish uchun hech narsa yo'q edi.")
+        elif text.strip():                                    # plain words: Claude works out what you want
+            reply_text = ""
+            if event.is_reply:
+                rm = await event.get_reply_message()
+                reply_text = (rm.message or "") if rm else ""
+            asyncio.create_task(responder.on_owner_message(text, reply_text))
 
     async def reminder_loop():
         while True:
