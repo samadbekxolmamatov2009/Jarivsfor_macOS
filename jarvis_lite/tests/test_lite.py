@@ -48,7 +48,7 @@ def make(claude=None, **kw):
         if silent:
             quiet.append(t)
     d = tempfile.mkdtemp()
-    kw.setdefault("work_hours", "off")                      # tests do not depend on the real clock
+    kw.setdefault("busy_hours", "off")                      # tests do not depend on the real clock
     st = Settings(grace=0, contacts_file=os.path.join(d, "c.txt"), info_file=os.path.join(d, "i.txt"), **kw)
     r = Responder(st, tg, notify, claude, sleep=instant, log=lambda m: None)
     r.silent_notes = quiet
@@ -565,7 +565,7 @@ def multi_setup(plans):
         notes.append(x)
     tg = MultiTG()
     d = tempfile.mkdtemp()
-    st = Settings(grace=0, work_hours="off", contacts_file=os.path.join(d, "c.txt"), info_file=os.path.join(d, "i.txt"))
+    st = Settings(grace=0, busy_hours="off", contacts_file=os.path.join(d, "c.txt"), info_file=os.path.join(d, "i.txt"))
     r = Responder(st, tg, notify, claude_multi, sleep=yielding_sleep, log=lambda m: None)
     r.now = lambda: clock[0]
     return r, tg, notes, prompts
@@ -641,33 +641,32 @@ SCHED = "mon,wed,fri 16:00-18:00; tue,thu,sat 17:00-19:30"
 sc = modes.parse_schedule(SCHED)
 check(sc.is_open(_dt.datetime(2026, 11, 2, 16, 30, tzinfo=TZ)) and not sc.is_open(_dt.datetime(2026, 11, 2, 18, 0, tzinfo=TZ))
       and sc.is_open(_dt.datetime(2026, 11, 3, 17, 0, tzinfo=TZ)) and not any(sc.is_open(_dt.datetime(2026, 11, 8, h, 0, tzinfo=TZ)) for h in range(24)),
-      "schedule: Mon/Wed/Fri 16-18, Tue/Thu/Sat 17-19:30, Sunday closed")
-check(modes.parse_schedule("off") is None and modes.parse_schedule("") is None and modes.parse_schedule("garbage") is None, "WORK_HOURS=off / garbage -> no schedule")
+      "schedule windows: Mon/Wed/Fri 16-18, Tue/Thu/Sat 17-19:30, none on Sunday")
+check(modes.parse_schedule("off") is None and modes.parse_schedule("") is None and modes.parse_schedule("garbage") is None, "BUSY_HOURS=off / garbage -> no schedule")
 check(sc.describe() == "dushanba/chorshanba/juma 16:00–18:00; seshanba/payshanba/shanba 17:00–19:30", "schedule is described in Uzbek")
-check(modes.next_phrase(sc, _dt.datetime(2026, 11, 2, 18, 30, tzinfo=TZ), "uz") == "Ertaga soat 17:00 dan keyin"
-      and modes.next_phrase(sc, _dt.datetime(2026, 11, 7, 20, 0, tzinfo=TZ), "uz") == "Dushanba kuni soat 16:00 dan keyin"
-      and modes.next_phrase(sc, _dt.datetime(2026, 11, 2, 10, 0, tzinfo=TZ), "en") == "today after 16:00", "'next time he answers' phrases")
 
 
 def mode_setup(sched=None, t0=None, claude=fake_claude):
-    r, tg, notes, st = make(claude, work_hours=sched or "off")
+    r, tg, notes, st = make(claude, busy_hours=sched or "off")
     r.now = lambda: clock[0]
     clock[0] = t0 if t0 is not None else at(2, 17, 0)
     r.last_kind = r.effective().kind                          # like a real start: remember the mode we begin in
     return r, tg, notes, st
 
 
-# --- 1) work hours, nobody answers for 15 minutes -> "busy" (the AI knows it)
-r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+# --- 1) free time (outside your busy hours): nobody answers for 15 minutes -> "busy" (the AI knows it)
+r, tg, notes, st = mode_setup(SCHED, at(2, 12, 0))
+check(r.effective().kind == "work", "outside the busy hours you are available")
 st.grace = 900
 seen.clear()
 run(r.on_message(5, tg.add("dars soat nechada?"), bro))
-check(len(tg.sent) == 1 and "really is busy right now" in seen[0][0] and "about 15 minutes" in seen[0][0], "in work hours the AI is told he did not answer for 15 minutes, so he really is busy")
+check(len(tg.sent) == 1 and "really is busy right now" in seen[0][0] and "about 15 minutes" in seen[0][0], "free time: the AI is told he did not answer for 15 minutes, so he really is busy")
 
 # --- 2) night: "uxladim"
 r, tg, notes, st = mode_setup()
 run(r.apply_mode("night"))
 check(r.effective().kind == "night" and notes and "Tungi rejim yoqildi" in notes[0] and r.silent_notes, "'uxladim' -> night mode, confirmation arrives silently")
+check(modes.parent_reply("Dadajonim", "Zufarbek") == "Assalomu alaykum, dadajon! Zufarbek hozir uxlayapti. Ertalab o'zi sizga yozadi.", "parents' night sentence")
 seen.clear()
 run(r.on_message(5, tg.add("salom, ertaga dars bormi?"), bro))
 check(len(tg.sent) == 1 and "bugungi ish vaqti tugagani" in tg.sent[0] and "Ertaga o'zi sizga javob beradi" in tg.sent[0] and not seen,
@@ -721,7 +720,7 @@ check(len(tg.sent) == 1 and "hozir band (dars o'tmoqda)" in tg.sent[0] and "Soat
 clock[0] = at(2, 17, 5)
 notes.clear()
 run(r.tick())
-check(r.effective().kind == "work" and any("Ish rejimi yoqildi" in x and "Brother" in x for x in notes), "busy time over -> back to work by itself, with a summary")
+check(r.effective().kind == "work" and any("Band vaqt tugadi" in x and "Brother" in x for x in notes), "busy time over -> back to work by itself, with a summary")
 r, tg, notes, st = mode_setup(None, at(2, 15, 0))
 run(r.apply_mode("busy", until_str="17:30", note="yig'ilish"))
 check(r.override["until"] == at(2, 17, 30), "busy 'until 17:30'")
@@ -729,30 +728,59 @@ r, tg, notes, st = mode_setup(None, at(2, 18, 0))
 run(r.apply_mode("busy", until_str="17:30"))
 check(r.override["until"] == at(3, 17, 30), "busy 'until 17:30' said at 18:00 -> tomorrow")
 
-# --- 6) the schedule works by itself
+# --- 6) your BUSY hours work by themselves (Mon/Wed/Fri 16:00-18:00, Tue/Thu/Sat 17:00-19:30)
 r, tg, notes, st = mode_setup(SCHED, at(2, 12, 0))
-check(r.effective().kind == "night" and r.effective().reason == "hours", "outside work hours -> night (by schedule)")
-run(r.on_message(5, tg.add("salom"), bro))
-check("hozir ish vaqtida emas" in tg.sent[0] and "Bugun soat 16:00 dan keyin" in tg.sent[0], "out of hours: 'not working now, answers today after 16:00'")
-clock[0] = at(2, 16, 1)
+check(r.effective().kind == "work", "Monday 12:00: you are free")
+clock[0] = at(2, 16, 30)
+mm = r.effective()
+check(mm.kind == "busy" and mm.reason == "hours" and mm.until == at(2, 18, 0), "Monday 16:30: busy by the schedule, until 18:00")
+seen.clear()
+run(r.on_message(5, tg.add("salom, bir savol bor edi"), bro))
+check(len(tg.sent) == 1 and tg.sent[0].startswith("Assalomu alaykum! Zufarbek hozir band. Soat 18:00 dan keyin o'zi javob beradi.") and not seen,
+      "busy hours: answered at once (no 15-minute wait, no AI): 'Zufarbek is busy, answers after 18:00'")
+run(r.on_message(5, tg.add("hoy"), bro))
+check(len(tg.sent) == 1, "busy hours: the same person is told only once")
+run(r.on_message(6, tg.add("hello, are you there?"), Sender(name="Random Person", id=61, contact=False)))
+check("busy right now" in tg.sent[-1] and "after 18:00" in tg.sent[-1], "busy hours: a stranger is told in English")
+run(r.on_message(7, tg.add("", kind="voice"), Sender(name="Otabek Akam", id=62)))
+check("hozir band" in tg.sent[-1] and not r.silent_notes, "busy hours: a voice message gets the same sentence, your notes are NOT silent")
+run(r.on_message(8, tg.add("o'g'lim?"), dad))
+check(len(tg.sent) == 3 and any("Dadajonim" in x and "yozdi" in x for x in notes), "busy hours: Dad still gets nothing from Jarvis, you are told")
+clock[0] = at(2, 17, 0)
 notes.clear()
 run(r.tick())
-check(r.effective().kind == "work" and any("Ish rejimi yoqildi" in x and "Brother" in x for x in notes), "work hours start by themselves -> summary")
+check(r.effective().kind == "busy", "tick inside the busy hours changes nothing")
 clock[0] = at(2, 18, 1)
 notes.clear()
 run(r.tick())
-check(r.effective().kind == "night" and any("Ish vaqti tugadi" in x for x in notes), "work hours end by themselves -> night, you are told")
-clock[0] = at(2, 12, 0)
-r, tg, notes, st = mode_setup(SCHED, at(2, 12, 0))
+check(r.effective().kind == "work" and any("Band vaqt tugadi" in x and "Brother" in x and "Otabek Akam" in x for x in notes), "busy hours end by themselves -> back to normal + summary of who wrote")
+r, tg, notes, st = mode_setup(SCHED, at(2, 15, 59))
+run(r.tick())
+clock[0] = at(2, 16, 0)
+notes.clear()
+run(r.tick())
+check(r.effective().kind == "busy" and any("Band vaqt boshlandi" in x and "18:00" in x for x in notes), "busy hours start by themselves -> you are told")
+clock[0] = at(8, 17, 0)
+check(r.effective().kind == "work", "Sunday: never busy by the schedule")
+clock[0] = at(3, 17, 0)
+check(r.effective().kind == "busy" and r.effective().until == at(3, 19, 30), "Tuesday 17:00-19:30 is busy")
+
+# «ish vaqtim boshlandi» (= I am free) during busy hours; «uxladim» lasts until you say you are up
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
 run(r.apply_mode("work"))
-check(r.effective().kind == "work", "'ish vaqtim boshlandi' outside the schedule -> work until the next scheduled change")
+check(r.effective().kind == "work", "'I am free' during busy hours -> available until the busy hours end")
 clock[0] = at(2, 18, 30)
-check(r.effective().kind == "night", "...then the schedule takes over again")
-r, tg, notes, st = mode_setup(SCHED, at(2, 17, 0))
-run(r.apply_mode("night"))
-check(r.effective().kind == "night" and r.effective().reason == "manual", "'uxladim' during work hours -> night now")
+check(r.effective().kind == "work", "...and after them you are free anyway")
 clock[0] = at(3, 17, 30)
-check(r.effective().kind == "work", "...and the next scheduled window (tomorrow) switches it back")
+check(r.effective().kind == "busy", "...the next busy window starts by itself")
+r, tg, notes, st = mode_setup(SCHED, at(2, 22, 0))
+run(r.apply_mode("night"))
+clock[0] = at(3, 12, 0)
+check(r.effective().kind == "night" and r.effective().reason == "manual", "'uxladim' lasts until you say you are up (not cut off by the schedule)")
+clock[0] = at(3, 17, 30)
+check(r.effective().kind == "night", "...even inside the next busy window")
+run(r.apply_mode("work"))
+check(r.effective().kind == "work" or r.effective().kind == "busy", "'ish vaqtim boshlandi' ends the night")
 
 # --- 7) reminders pause at night and restart in the morning
 r, tg, notes, st = mode_setup()
@@ -794,7 +822,8 @@ run(r.on_owner_message("nimadir"))
 check(r.effective().kind == "work", "an unknown mode from Claude is ignored")
 check(lite.MODE_NIGHT.match(lite.norm("Uxladim")) and lite.MODE_NIGHT.match(lite.norm("good night")) and lite.MODE_WORK.match(lite.norm("Ish vaqtim boshlandi"))
       and lite.MODE_WORK.match(lite.norm("uyg'ondim")) and not lite.MODE_NIGHT.match(lite.norm("uxlab qoldi")), "quick command words")
-check(Settings.from_env({}).work_hours == modes.DEFAULT_WORK_HOURS and Settings.from_env({"WORK_HOURS": "off"}).work_hours == "off" and Settings.from_env({"TZ_OFFSET": "3"}).tz_hours == 3, "WORK_HOURS / TZ_OFFSET settings")
+check(Settings.from_env({}).busy_hours == modes.DEFAULT_BUSY_HOURS and Settings.from_env({"BUSY_HOURS": "off"}).busy_hours == "off" and Settings.from_env({"TZ_OFFSET": "3"}).tz_hours == 3, "BUSY_HOURS / TZ_OFFSET settings")
+check(Settings.from_env({"WORK_HOURS": "mon 10:00-11:00"}).busy_hours == modes.DEFAULT_BUSY_HOURS, "the old WORK_HOURS name is ignored (it meant the opposite)")
 
 # ================= database (SQLite + Turso over HTTP) and scheduled messages =================
 import http.server  # noqa: E402

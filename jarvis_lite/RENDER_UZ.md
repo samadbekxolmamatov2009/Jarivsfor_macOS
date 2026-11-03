@@ -69,20 +69,25 @@ Bot darrov tasdiqlaydi: «⏰ #3 rejalashtirildi: Muhammad Akam ga 04.11.2026 10
 - Ism bir nechta odamga mos kelsa, qaysi biri ekanini so'raydi; topa olmasa yubormaydi.
 - Server o'chiq bo'lib, xabar 6 soatdan ko'proq kechiksa — eskirgan xabarni **yubormaydi**, sizga aytadi.
 
-## Ish vaqti va rejimlar
-**15 daqiqa qoidasi.** Ish vaqtida xabar kelsa, Jarvis 15 daqiqa kutadi. Shu orada o'zingiz javob yozsangiz, jim turadi. Yozmasangiz — «Zufarbek hozir band» deb javob beradi (demak rostdan band ekansiz).
+## Band vaqt va rejimlar
+**Siz bo'sh paytingizda (15 daqiqa qoidasi).** Xabar kelsa Jarvis 15 daqiqa kutadi. Shu orada o'zingiz javob yozsangiz, jim turadi. Yozmasangiz «Zufarbek hozir band» deb javob beradi (demak rostdan band ekansiz).
+
+**Band vaqtlaringiz (avtomatik).** Siz aytgan soatlarda javob bera olmaysiz, shuning uchun o'sha vaqtda Jarvis **kutmasdan darrov** yozganga «Zufarbek hozir band. Soat 18:00 dan keyin o'zi javob beradi» deydi (bir odamga bir marta, ruscha/inglizcha ham):
+- **dushanba, chorshanba, juma: 16:00–18:00**
+- **seshanba, payshanba, shanba: 17:00–19:30**
+- yakshanba — band vaqt yo'q (butun kun bo'shsiz).
+
+Band vaqt boshlanganda botdan «⏳ Band vaqt boshlandi — soat 18:00 gacha» keladi, tugaganda esa «☀️ Band vaqt tugadi» va shu vaqtda kimlar yozganining ro'yxati. Band vaqtda 30 daqiqalik eslatmalar to'xtaydi va tugagach qaytadan boshlanadi. Ota-onangiz yozsa baribir faqat sizga xabar keladi (ularga Jarvis yozmaydi).
 
 **Botga yozing:**
 | Siz yozasiz | Nima bo'ladi |
 |---|---|
-| **«uxladim»** (yoki `good night`, «yotdim») | 🌙 Tungi rejim. Yozganlarga darrov: «Zufarbek bugungi ish vaqti tugagani uchun javob bera olmaydi, ertaga o'zi javob beradi». Sizga xabarlar **ovozsiz** keladi. Dadajonim/Ayajonim'ga nazokatli bitta xabar ketadi («…hozir uxlayapti, ertalab o'zi yozadi»). |
-| **«ish vaqtim boshlandi»** (yoki «uyg'ondim», `good morning`) | ☀️ Ish rejimi. Bot tunda kimlar yozganini **ro'yxat qilib** beradi va javobsiz qolganlarni eslatishni qayta boshlaydi. |
-| **«darsdaman 2 soat»**, «yig'ilishdaman soat 17:00 gacha» | ⏳ Band rejim: yozganlarga «Zufarbek hozir band (dars o'tmoqda). Soat 17:00 dan keyin o'zi javob beradi». Vaqt o'tgach o'zi odatdagi rejimga qaytadi va xulosa beradi. |
+| **«uxladim»** (yoki `good night`, «yotdim») | 🌙 Tungi rejim: yozganlarga darrov «Zufarbek bugungi ish vaqti tugagani uchun javob bera olmaydi, ertaga o'zi javob beradi». Sizga xabarlar **ovozsiz** keladi. Dadajonim/Ayajonim'ga nazokatli bitta xabar ketadi («…hozir uxlayapti, ertalab o'zi yozadi»). **Siz «ish vaqtim boshlandi» demaguningizcha** davom etadi. |
+| **«ish vaqtim boshlandi»** (yoki «uyg'ondim», `good morning`) | ☀️ Odatdagi rejim. Bot tunda kimlar yozganini ro'yxat qilib beradi va eslatmalarni qayta boshlaydi. Band vaqt paytida desangiz — «bo'shman» ma'nosida, shu band vaqt tugaguncha bo'sh hisoblanadi. |
+| **«darsdaman 2 soat»**, «yig'ilishdaman soat 17:00 gacha» | ⏳ Qo'shimcha band rejim: yozganlarga «Zufarbek hozir band (dars o'tmoqda). Soat 17:00 dan keyin o'zi javob beradi». Vaqt o'tgach o'zi qaytadi. |
 
-Rejim Render qayta joylansa ham yo'qolmaydi (Telegram'dagi «Saved Messages»da `#jarvis_state` xabari sifatida saqlanadi, uni o'chirmang).
-
-**Avtomatik ish vaqti** (O'zbekiston vaqti): dushanba/chorshanba/juma **16:00–18:00**, seshanba/payshanba/shanba **17:00–19:30**; yakshanba — ish yo'q. Bu vaqtdan tashqarida Jarvis avtomatik tungi rejimda: «hozir ish vaqtida emas, bugun soat 16:00 dan keyin o'zi javob beradi». «Ish vaqtim boshlandi» deb qo'lda ham yoqsangiz bo'ladi (keyingi jadval o'zgarishigacha ishlaydi).
-Sozlamalar (Render → Environment): `WORK_HOURS` (masalan `mon,tue,wed,thu,fri 09:00-18:00` yoki `off` — jadvalsiz, faqat o'z buyruqlaringiz bilan), `TZ_OFFSET` (tayyor `5`), `GRACE_SECONDS` (tayyor `900` = 15 daqiqa).
+Rejim Render qayta joylansa ham yo'qolmaydi (bazada saqlanadi).
+Sozlamalar (Render → Environment): **`BUSY_HOURS`** — band vaqtlaringiz (masalan `mon,tue,wed,thu,fri 14:00-16:00` yoki `off` — jadvalsiz, faqat o'z buyruqlaringiz bilan), `TZ_OFFSET` (tayyor `5` = O'zbekiston), `GRACE_SECONDS` (tayyor `900` = 15 daqiqa). Eski `WORK_HOURS` nomi endi ishlatilmaydi.
 
 ## Kimga qanday javob beriladi
 | Kim yozsa | Jarvis nima qiladi |
