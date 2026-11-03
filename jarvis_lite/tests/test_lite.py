@@ -23,9 +23,9 @@ class FakeTG:
         self.msgs, self.sent, self.next = [], [], 1000
         self.on_sleep = None
 
-    def add(self, text="", out=False, kind="text", id=None):
+    def add(self, text="", out=False, kind="text", id=None, ts=0.0):
         self.next += 1
-        self.msgs.append(Msg(id or self.next, out, text, kind))
+        self.msgs.append(Msg(id or self.next, out, text, kind, ts))
         return self.msgs[-1].id
 
     async def recent(self, chat, n):
@@ -527,9 +527,9 @@ class MultiTG:
         self.n = 5000
         self.deleted = []
 
-    def add(self, chat, text, out=False):
+    def add(self, chat, text, out=False, ts=0.0):
         self.n += 1
-        self.chats[chat].append(Msg(self.n, out, text, "text"))
+        self.chats[chat].append(Msg(self.n, out, text, "text", ts))
         return self.n
 
     async def recent(self, chat, n):
@@ -1052,6 +1052,181 @@ except Exception:
 check(not crashed, "a database outage never crashes the minute loop")
 run(r4.attention(5, "Brother", "x", "🙋"))
 check(len(r4.pending) == 1 and r4.effective().kind == "work", "...and the bot keeps working in memory while the database is down")
+
+# ================= a greeting only OPENS a conversation =================
+g = lite.strip_greeting
+check(g("Assalomu alaykum! Zufarbek hozir band.") == "Zufarbek hozir band." and g("Hi! I'm Zufarbek's AI assistant.") == "I'm Zufarbek's AI assistant."
+      and g("Здравствуйте! Он занят.") == "Он занят." and g("Assalomu alaykum, dadajon! Zufarbek uxlayapti.") == "Dadajon! Zufarbek uxlayapti."
+      and g("Salom, qalaysan?") == "Qalaysan?", "strip_greeting removes the opening greeting and capitalises the rest")
+check(g("Zufarbek hozir band.") == "Zufarbek hozir band." and g("Salom!") == "Salom!" and g("") == "" and g("History of hi") == "History of hi", "...and leaves everything else alone")
+check(Settings().convo_gap == 4 * 3600 and Settings.from_env({"CONVO_GAP_HOURS": "2"}).convo_gap == 7200, "CONVO_GAP_HOURS setting (default 4)")
+
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+M = lambda i, out, ts: Msg(i, out, "x", "text", ts)  # noqa: E731
+newm = [M(10, False, at(3, 14, 0))]
+check(r.is_ongoing([M(9, True, at(3, 13, 30))] + newm, newm), "last message 30 minutes ago -> ongoing")
+check(not r.is_ongoing([M(9, True, at(3, 9, 0))] + newm, newm), "last message 5 hours ago -> a new conversation")
+check(not r.is_ongoing(newm, newm) and not r.is_ongoing([M(9, False, 0)] + newm, newm), "no earlier message (or unknown time) -> a new conversation")
+check(r.is_ongoing([M(8, False, at(3, 11, 0)), M(9, True, at(3, 13, 59))] + newm, newm), "the most recent earlier message counts (either side)")
+
+# AI answers: the prompt says whether to greet
+seen.clear()
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+st.grace = 900
+tg.add("kecha gaplashgandik", ts=at(3, 13, 40))
+run(r.on_message(5, tg.add("dars soat nechada?", ts=at(3, 14, 0)), bro))
+check("CONTINUING conversation" in seen[0][0] and "do NOT start with a greeting" in seen[0][0] and "START of a conversation" not in seen[0][0],
+      "ongoing chat: Claude is told NOT to greet and not to repeat that he is busy")
+seen.clear()
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+run(r.on_message(5, tg.add("dars soat nechada?", ts=at(3, 14, 0)), bro))
+check("START of a conversation" in seen[0][0] and "ONE short, friendly greeting" in seen[0][0] and "CONTINUING" not in seen[0][0], "first message: Claude is told to greet once")
+seen.clear()
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+tg.add("ertaga gaplashamiz", out=True, ts=at(3, 8, 0))                                  # 6 hours ago: an old conversation
+run(r.on_message(5, tg.add("dars soat nechada?", ts=at(3, 14, 0)), bro))
+check("START of a conversation" in seen[0][0], "the last message was 6 hours ago -> greeting is fine again")
+
+# fixed sentences: greeting only when the chat is new
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+tg.add("savol bor edi", ts=at(2, 16, 10))
+run(r.on_message(5, tg.add("yana bir narsa so'ramoqchi edim", ts=at(2, 16, 30)), bro))
+check(tg.sent[0].startswith("Zufarbek hozir band. Soat 18:00 dan keyin o'zi javob beradi.") and "Assalomu" not in tg.sent[0], "busy hours, ongoing chat: no «Assalomu alaykum», straight to the point")
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+run(r.on_message(5, tg.add("salom, bir savol bor edi", ts=at(2, 16, 30)), bro))
+check(tg.sent[0].startswith("Assalomu alaykum! Zufarbek hozir band."), "busy hours, new chat: greeted")
+r, tg, notes, st = mode_setup()
+run(r.apply_mode("night"))
+tg.add("men yozgandim", out=True, ts=clock[0] - 600)
+run(r.on_message(5, tg.add("ha, javob berasizmi?", ts=clock[0]), bro))
+check(tg.sent[0].startswith("Zufarbek bugungi ish vaqti tugagani uchun") and "Assalomu" not in tg.sent[0], "night, ongoing chat: no greeting")
+r, tg, notes, st = mode_setup()
+tg.add("o'g'lim, qalaysan", ts=clock[0] - 300)
+run(r.apply_mode("night"))
+run(r.on_message(5, tg.add("uxladingmi?", ts=clock[0]), dad))
+check(tg.sent[0].startswith("Dadajon! Zufarbek hozir uxlayapti."), "night, Dad in an ongoing chat: no «Assalomu alaykum», still respectful")
+r, tg, notes, st = mode_setup()
+tg.add("hello", ts=clock[0] - 120)
+run(r.on_message(5, tg.add("", kind="voice", ts=clock[0]), bro))
+check(tg.sent[0].startswith("Zufarbek Jumayev hozir band, ovozli xabarni eshita olmayman.") and "Assalomu" not in tg.sent[0], "voice message in an ongoing chat: no greeting")
+r, tg, notes, st = pay_setup()
+r.now = lambda: clock[0]
+tg.add("salom aka", ts=clock[0] - 200)
+run(r.on_message(5, tg.add("karta raqamingiz?", ts=clock[0]), muh))
+check("Assalomu" not in tg.sent[0] and CARD in tg.sent[0] and tg.sent[0].startswith("Cefr tys boti serveri uchun to'lov: 13$."), "card number in an ongoing chat: no greeting, still correct")
+r, tg, notes, st = make(broken)
+r.now = lambda: clock[0]
+tg.add("salom", ts=clock[0] - 100)
+run(r.on_message(5, tg.add("hello bro how are you", ts=clock[0]), bro))
+check(not tg.sent[0].lower().startswith(("hi", "hello")), "AI unavailable + ongoing chat: the fixed sentence is also without a greeting")
+r, tg, notes, st = make(fake_claude)
+run(r.on_message(5, tg.add("salom, qalaysan", ts=0), Sender(name="Random Person", id=71, contact=False)))
+check(tg.sent[0].startswith("Salom! Men Zufarbekning"), "a stranger's first message is greeted")
+r, tg, notes, st = make(fake_claude)
+r.now = lambda: clock[0]
+tg.add("hi", ts=clock[0] - 100)
+run(r.on_message(5, tg.add("are you there? hello", ts=clock[0]), Sender(name="Random Person", id=72, contact=False)))
+check(not tg.sent[0].startswith(("Hi", "Hello", "Salom")), "a stranger writing again in an ongoing chat gets no new greeting")
+
+# messages you ask Claude to write: told when to greet
+r, tg, notes, st, prompts = owner_setup({"action": "send", "target": "Muhammad Akam", "message": "Server to'lovi haqida eslatma.", "reply": ""})
+r.tg = MultiTG()
+r.now = lambda: clock[0]
+clock[0] = at(3, 14, 0)
+r.tg.add(6046141246, "salom aka", out=True, ts=at(3, 13, 30))
+r.tg.add(6046141246, "ha", ts=at(3, 13, 40))
+run(r.attention(6046141246, "Muhammad Akam", "savol", "🙋"))
+run(r.on_owner_message("serverga to'lov haqida ayt"))
+check("(30 daq. oldin)" in prompts[0][1] and "(20 daq. oldin)" in prompts[0][1] and "ONLY if the recent chat shows no message within the last 4 hours" in prompts[0][0],
+      "when you ask for a message, Claude sees how old the last messages are and is told to greet only after a long silence")
+
+# ================= you are already in the conversation: Jarvis keeps out (the mistake from the screenshot) =================
+def convo_setup(mode_sched=None, t0=None, **kw):
+    r, tg, notes, st = mode_setup(mode_sched, t0 if t0 is not None else at(3, 20, 0))
+    st.grace = 900
+    return r, tg, notes, st
+
+
+# 1) you answered in the MIDDLE; their last message came after your answer
+r, tg, notes, st = convo_setup()
+a1 = tg.add("haaa", ts=at(3, 19, 40))
+tg.add("yo'q, yuklamang", out=True, ts=at(3, 19, 41))                          # YOU, written normally (not a Telegram «reply»)
+tg.add("yuklaymi", ts=at(3, 19, 45))
+tg.add("Terminal?", ts=at(3, 19, 50))
+last = tg.add("ok", ts=at(3, 19, 55))
+seen.clear()
+run(r.on_message(5, a1, bro))
+check(not tg.sent and not notes and not seen, "you replied in the middle of their messages (not as a Telegram reply) -> Jarvis stays out, no note to you")
+# 2) you answered after everything (the old rule still works)
+r, tg, notes, st = convo_setup()
+a1 = tg.add("haaa", ts=at(3, 19, 40))
+tg.add("ha, bering", out=True, ts=at(3, 19, 59))
+run(r.on_message(5, a1, bro))
+check(not tg.sent, "you answered after their message -> quiet")
+# 3) you were chatting with them just BEFORE their message (free time): a live conversation
+r, tg, notes, st = convo_setup()
+tg.add("terminalni ochasiz", out=True, ts=at(3, 19, 50))
+run(r.on_message(5, tg.add("ok", ts=at(3, 19, 55)), bro))
+check(not tg.sent and not notes, "you wrote to them 5 minutes before their message -> a live conversation, Jarvis stays out")
+r, tg, notes, st = convo_setup()
+tg.add("terminalni ochasiz", out=True, ts=at(3, 19, 0))                       # 1 hour before: the conversation is over
+run(r.on_message(5, tg.add("ok", ts=at(3, 20, 0)), bro))
+check(len(tg.sent) == 1, "you last wrote to them an hour before -> Jarvis answers as usual")
+# 4) busy hours / night: the rule «you spoke just before» does not apply (you said you are not available)
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+tg.add("hozir gaplashamiz", out=True, ts=at(2, 16, 25))
+run(r.on_message(5, tg.add("yaxshi, kutaman", ts=at(2, 16, 30)), bro))
+check(len(tg.sent) == 1 and "hozir band" in tg.sent[0], "busy hours: still told once (you set the schedule yourself)")
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+a1 = tg.add("savol", ts=at(2, 16, 29))
+tg.add("hozir javob beraman", out=True, ts=at(2, 16, 30))
+run(r.on_message(5, a1, bro))
+check(not tg.sent, "busy hours: but if you DO answer, Jarvis is quiet")
+# 5) Jarvis's own earlier messages (even from before a restart) are not «you»
+r, tg, notes, st = convo_setup()
+tg.add("Zufarbek hozir band.\n\n🤖 Jarvis (avto-javob)", out=True, ts=at(3, 19, 50))      # not in our_ids: the server restarted since
+run(r.on_message(5, tg.add("ok, kutaman", ts=at(3, 19, 55)), bro))
+check(len(tg.sent) == 1, "Jarvis's own old reply is not mistaken for YOUR message")
+r, tg, notes, st = convo_setup()
+run(r.attention(5, "Brother", "xabar", "🙋"))
+tg.add("Zufarbek hozir band.\n\n🤖 Jarvis (avto-javob)", out=True)
+clock[0] += 31 * 60
+notes.clear()
+run(r.check_reminders())
+check(any("Javob berasizmi" in x for x in notes), "reminders: Jarvis's own reply does not cancel the reminder; only YOUR message does")
+tg.add("javob yozdim", out=True)
+clock[0] += 31 * 60
+notes.clear()
+run(r.check_reminders())
+check(5 not in r.pending, "reminders: your own message ends them")
+
+# ================= replies never stop in the middle of a sentence =================
+tr = lite.trim_to_sentence
+check(tr("Zufarbek hozir band, bir oz vaqtdan keyin javob beradi. Terminal va VS Code haqidagi savolingizga u o'zi javob beradi, shuning uchun")
+      == "Zufarbek hozir band, bir oz vaqtdan keyin javob beradi. Terminal va VS Code haqidagi savolingizga u o'zi javob beradi.",
+      "a reply cut mid-sentence loses only the dangling part («shuning uchun»)")
+check(tr("Birinchi gap tugadi. Ikkinchi gap yarim qoldi va u") == "Birinchi gap tugadi.", "no comma to cut at -> back to the last full sentence")
+check(tr("Zufarbek band.") == "Zufarbek band." and tr("Bo'ldimi?") == "Bo'ldimi?" and tr("U aytdi: «yo'q»") == "U aytdi: «yo'q»" and tr("") == "", "complete replies are left alone")
+check(tr("Zufarbek hozir band va keyin") == "Zufarbek hozir band va keyin." and tr("Hm, shuning uchun,") == "Hm, shuning uchun.", "no full sentence at all -> just closed with a full stop")
+
+
+async def cut_off(system, user):
+    return "Zufarbek hozir band, keyin javob beradi. Terminal haqidagi savolingizga u o'zi javob beradi, shuning uchun [[OWNER]]"
+
+
+r, tg, notes, st = make(cut_off)
+run(r.on_message(5, tg.add("Terminal?"), bro))
+check(tg.sent[0].startswith("Zufarbek hozir band, keyin javob beradi. Terminal haqidagi savolingizga u o'zi javob beradi.\n") and "shuning uchun" not in tg.sent[0] and "[[OWNER]]" not in tg.sent[0],
+      "the real case: marker in the middle of a sentence -> the dangling «shuning uchun» is cut off")
+check(any("kutyapti" in x for x in notes), "...and you are still told it needs you")
+check("as the very LAST thing, after a COMPLETE sentence" in r.system_prompt(), "Claude is told to put the marker after a complete sentence")
+
+# short Uzbek messages must not get an English answer
+check(all(lite.detect_lang(x) == "uz" for x in ("ok", "haaa", "yaxshi, kutaman", "Terminal?", "yuklaymi")), "short Uzbek chat words -> Uzbek")
+check(lite.detect_lang("hello bro how are you") == "en" and lite.detect_lang("are you there?") == "en" and lite.detect_lang("Привет, как дела") == "ru", "clear English / Russian are still recognised")
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+run(r.on_message(5, tg.add("ok", ts=at(2, 16, 30)), bro))
+check("hozir band" in tg.sent[0] and "busy" not in tg.sent[0], "busy hours: «ok» gets the Uzbek sentence")
 
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
