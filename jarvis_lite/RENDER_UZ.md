@@ -89,6 +89,12 @@ Band vaqt boshlanganda botdan «⏳ Band vaqt boshlandi — soat 18:00 gacha» k
 Rejim Render qayta joylansa ham yo'qolmaydi (bazada saqlanadi).
 Sozlamalar (Render → Environment): **`BUSY_HOURS`** — band vaqtlaringiz (masalan `mon,tue,wed,thu,fri 14:00-16:00` yoki `off` — jadvalsiz, faqat o'z buyruqlaringiz bilan), `TZ_OFFSET` (tayyor `5` = O'zbekiston), `GRACE_SECONDS` (tayyor `900` = 15 daqiqa). Eski `WORK_HOURS` nomi endi ishlatilmaydi.
 
+## Siz suhbatda bo'lsangiz Jarvis aralashmaydi
+Odam bilan o'zingiz yozishayotgan bo'lsangiz (Telegram'ning «reply» tugmasisiz, oddiy yozgan bo'lsangiz ham), Jarvis «Zufarbek band» deb aralashmaydi va sizga xabar ham bermaydi:
+- odamning birinchi javobsiz xabaridan **keyin** biror narsa yozgan bo'lsangiz (oxirgisidan oldin bo'lsa ham), yoki
+- bo'sh vaqtingizda uning birinchi xabaridan oldingi **30 daqiqa** ichida unga yozgan bo'lsangiz (jonli suhbat).
+Jarvis'ning o'z javoblari («🤖 Jarvis» belgili) sizning xabaringiz hisoblanmaydi. Band vaqt va tungi rejimda faqat «keyin yozgan bo'lsangiz» qoidasi ishlaydi.
+
 ## Salom faqat suhbat boshida
 Jarvis «Assalomu alaykum» deb faqat suhbat **boshlanganda** yozadi. Chatda oxirgi 4 soat ichida xabar bo'lsa (sizdan yoki undan, Jarvis'ning avvalgi javobi ham), suhbat davom etayotgan hisoblanadi: salomsiz, to'g'ridan-to'g'ri gapga o'tadi va «men AI yordamchiman», «Zufarbek band» kabi gaplarni takrorlamaydi. 4 soatdan ko'p jimlikdan keyin yozilsa, yana salom bilan boshlaydi. Bu tayyor jumlalarga (band, tungi rejim, ovozli xabar, karta), AI javoblariga va «unga ayt» deganda Claude yozadigan xabarlarga ham tegishli. Vaqtni Render → Environment → `CONVO_GAP_HOURS` (tayyor `4`) bilan o'zgartirsa bo'ladi.
 
