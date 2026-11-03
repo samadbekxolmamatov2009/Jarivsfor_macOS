@@ -149,3 +149,66 @@ def parent_reply(mode, name, owner):
     if mode.kind == "night" and mode.reason == "manual":
         return f"Assalomu alaykum{voc}! {owner} hozir uxlayapti. Ertalab o'zi sizga yozadi."
     return f"Assalomu alaykum{voc}! {owner} hozir javob bera olmayapti. Imkon bo'lishi bilan o'zi sizga yozadi."
+
+
+# ---------------------------------------------------------------- time words for scheduled messages
+MONTHS_UZ = {"yanvar": 1, "fevral": 2, "mart": 3, "aprel": 4, "may": 5, "iyun": 6, "iyul": 7, "avgust": 8,
+             "sentabr": 9, "sentyabr": 9, "oktabr": 10, "oktyabr": 10, "noyabr": 11, "dekabr": 12}
+
+
+def parse_when(text, now_dt):
+    """'ertaga 10:00' | 'bugun 18:30' | '18:30' | 'soat 10' | '05.11 10:00' | '5-noyabr 10:00' | '2026-11-05 10:00' |
+    '2 soatdan keyin' | '30 daqiqadan keyin'  ->  aware datetime (in now_dt's zone), or None if it can't be understood.
+    A time with no day means today, or tomorrow if it has already passed."""
+    t = re.sub(r"[’‘ʻʼ`]", "'", (text or "").lower()).strip()
+    if not t:
+        return None
+    tz = now_dt.tzinfo
+
+    def at(day, h, mi):
+        if not (0 <= h < 24 and 0 <= mi < 60):
+            return None
+        return datetime.datetime(day.year, day.month, day.day, h, mi, tzinfo=tz)
+
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*(daqiqa|minut|min|soat|hour|h)\w*\s*(?:dan\s*)?keyin|in\s+(\d+)\s*(min|hour|h)", t)
+    if m:
+        n = float((m.group(1) or m.group(3)).replace(",", "."))
+        unit = m.group(2) or m.group(4)
+        return now_dt + datetime.timedelta(minutes=n * (60 if unit.startswith(("soat", "hour", "h")) else 1))
+
+    m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2})[:.](\d{2})", t)
+    if m:
+        try:
+            return at(datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))), int(m.group(4)), int(m.group(5)))
+        except ValueError:
+            return None
+    m = re.search(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\s+(?:soat\s*)?(\d{1,2})[:.](\d{2})", t)
+    if m:
+        year = int(m.group(3)) if m.group(3) else now_dt.year
+        year += 2000 if year < 100 else 0
+        try:
+            return at(datetime.date(year, int(m.group(2)), int(m.group(1))), int(m.group(4)), int(m.group(5)))
+        except ValueError:
+            return None
+    m = re.search(r"(\d{1,2})[- ]?(" + "|".join(MONTHS_UZ) + r")\w*\s+(?:soat\s*)?(\d{1,2})[:.](\d{2})", t)
+    if m:
+        try:
+            return at(datetime.date(now_dt.year, MONTHS_UZ[m.group(2)], int(m.group(1))), int(m.group(3)), int(m.group(4)))
+        except ValueError:
+            return None
+
+    day = None
+    if re.search(r"\b(?:bugun|today)\b", t):
+        day = now_dt.date()
+    elif re.search(r"\b(?:ertaga|tomorrow)\b", t):
+        day = now_dt.date() + datetime.timedelta(days=1)
+    elif re.search(r"\bindin\w*|\bday after tomorrow\b", t):
+        day = now_dt.date() + datetime.timedelta(days=2)
+    m = re.search(r"(?:soat\s*)?(\d{1,2})[:.](\d{2})", t) or re.search(r"soat\s*(\d{1,2})(?![\d:.])", t)
+    if not m:
+        return None
+    h, mi = int(m.group(1)), int(m.group(2)) if m.lastindex and m.lastindex >= 2 else 0
+    when = at(day or now_dt.date(), h, mi)
+    if when and day is None and when <= now_dt:
+        when += datetime.timedelta(days=1)                   # "18:30" said at 19:00 means tomorrow
+    return when

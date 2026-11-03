@@ -12,7 +12,7 @@ apt-get install -y -qq python3 python3-venv python3-pip >/dev/null
 echo "2/5 👤 Foydalanuvchi va papkalar..."
 id jarvis >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin jarvis
 mkdir -p "$APP" "$DATA"
-cp "$HERE/lite.py" "$HERE/modes.py" "$HERE/langdetect.py" "$HERE/configure.sh" "$APP/"
+cp "$HERE/lite.py" "$HERE/modes.py" "$HERE/store.py" "$HERE/langdetect.py" "$HERE/configure.sh" "$APP/"
 [ -f "$DATA/contacts.txt" ] || cp "$HERE/contacts.default.txt" "$DATA/contacts.txt"     # sizning tahrirlaringiz bosib ketilmaydi
 [ -f "$DATA/info.txt" ] || cp "$HERE/info.default.txt" "$DATA/info.txt"
 chown -R jarvis:jarvis "$DATA"; chmod 700 "$DATA"

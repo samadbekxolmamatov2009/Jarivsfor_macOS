@@ -796,5 +796,233 @@ check(lite.MODE_NIGHT.match(lite.norm("Uxladim")) and lite.MODE_NIGHT.match(lite
       and lite.MODE_WORK.match(lite.norm("uyg'ondim")) and not lite.MODE_NIGHT.match(lite.norm("uxlab qoldi")), "quick command words")
 check(Settings.from_env({}).work_hours == modes.DEFAULT_WORK_HOURS and Settings.from_env({"WORK_HOURS": "off"}).work_hours == "off" and Settings.from_env({"TZ_OFFSET": "3"}).tz_hours == 3, "WORK_HOURS / TZ_OFFSET settings")
 
+# ================= database (SQLite + Turso over HTTP) and scheduled messages =================
+import http.server  # noqa: E402
+import sqlite3 as _sq  # noqa: E402
+import threading as _thr  # noqa: E402
+import store  # noqa: E402
+
+db0 = store.SqliteDb(":memory:")
+run(db0.init())
+run(db0.kv_set("a", "1"))
+run(db0.kv_set("a", "2"))
+check(run(db0.kv_get("a")) == "2" and run(db0.kv_get("nope")) is None, "SQLite: kv_set overwrites, missing key is None")
+check(run(db0.query("INSERT INTO scheduled (chat, name, text, send_at, created_at) VALUES (?,?,?,?,?) RETURNING id", [5, "X", "t", 1, 1]))[0]["id"] == 1, "INSERT ... RETURNING id works")
+
+
+class FakeTurso(http.server.BaseHTTPRequestHandler):
+    """A tiny stand-in for Turso's /v2/pipeline endpoint (backed by sqlite) — checks my client speaks the protocol."""
+    conn = _sq.connect(":memory:", check_same_thread=False)
+    seen_auth = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        body = _json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeTurso.seen_auth.append(self.headers.get("Authorization"))
+        if self.path != "/v2/pipeline" or self.headers.get("Authorization") != "Bearer SECRET":
+            self.send_response(401)
+            self.end_headers()
+            return
+        results = []
+        for rq in body["requests"]:
+            if rq["type"] != "execute":
+                results.append({"type": "ok", "response": {"type": "close"}})
+                continue
+            args = []
+            for a in rq["stmt"].get("args", []):
+                args.append(None if a["type"] == "null" else int(a["value"]) if a["type"] == "integer" else a["value"])
+            try:
+                cur = FakeTurso.conn.execute(rq["stmt"]["sql"], args)
+            except Exception as e:
+                results.append({"type": "error", "error": {"message": str(e)}})
+                continue
+            cols = [{"name": d[0]} for d in (cur.description or [])]
+            rows = [[({"type": "null"} if v is None else {"type": "integer", "value": str(v)} if isinstance(v, int) else {"type": "text", "value": v}) for v in row]
+                    for row in cur.fetchall()]
+            FakeTurso.conn.commit()
+            results.append({"type": "ok", "response": {"type": "execute", "result": {"cols": cols, "rows": rows, "affected_row_count": max(cur.rowcount, 0)}}})
+        out = _json.dumps({"results": results}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), FakeTurso)
+_thr.Thread(target=srv.serve_forever, daemon=True).start()
+turso = store.TursoDb(f"http://127.0.0.1:{srv.server_address[1]}", "SECRET")
+run(turso.init())
+run(turso.kv_set("k", "väl"))
+check(run(turso.kv_get("k")) == "väl" and FakeTurso.seen_auth[0] == "Bearer SECRET", "Turso HTTP client: sends the Bearer token, writes and reads back (also non-ASCII)")
+check(run(turso.query("INSERT INTO scheduled (chat, name, text, send_at, created_at) VALUES (?,?,?,?,?) RETURNING id", [6046141246, "Muhammad Akam", "salom", 99, 1]))[0]["id"] == 1
+      and run(turso.query("SELECT chat, name FROM scheduled"))[0] == {"chat": 6046141246, "name": "Muhammad Akam"}, "Turso: big integers and rows come back right")
+check(run(turso.execute("UPDATE scheduled SET status='x' WHERE id=1")) == 1 and run(turso.execute("UPDATE scheduled SET status='y' WHERE id=99")) == 0, "Turso: affected row count")
+try:
+    run(store.TursoDb(f"http://127.0.0.1:{srv.server_address[1]}", "WRONG").kv_get("k"))
+    check(False, "a wrong token must be an error")
+except store.DbError as e:
+    check("401" in str(e) and "WRONG" not in str(e), "Turso: wrong token -> clear error that never prints the token")
+try:
+    run(turso.query("SELECT * FROM no_such_table"))
+    check(False, "an SQL error must be an error")
+except store.DbError as e:
+    check("no such table" in str(e), "Turso: SQL errors come through")
+check(store.TursoDb("libsql://my-db-me.turso.io", "t").endpoint == "https://my-db-me.turso.io/v2/pipeline", "libsql:// URL -> https:// endpoint")
+check(isinstance(store.make_db({"TURSO_DATABASE_URL": "libsql://x.turso.io", "TURSO_AUTH_TOKEN": "t"}), store.TursoDb)
+      and isinstance(store.make_db({}, tempfile.mkdtemp()), store.SqliteDb), "make_db: Turso when configured, else a local file")
+
+
+def db_setup(**kw):
+    r, tg, notes, st = mode_setup(**kw)
+    r.db = store.SqliteDb(":memory:")
+    run(r.db.init())
+    return r, tg, notes, st
+
+
+# --- time zone: Uzbekistan (UTC+5)
+r, tg, notes, st = db_setup(t0=at(3, 14, 20))
+check(Settings().tz_hours == 5 and Settings.from_env({}).tz_hours == 5 and r.utc_label() == "UTC+5", "time zone defaults to Uzbekistan, UTC+5")
+run(r.say_time())
+check("03.11.2026 14:20" in notes[-1] and "UTC+5" in notes[-1], "«/vaqt» tells the bot's time in Tashkent time")
+check(lite.TIME_CMD.fullmatch(lite.norm("/vaqt")) and lite.TIME_CMD.fullmatch(lite.norm("Soat")), "«/vaqt» command words")
+
+# --- scheduled messages: /yoz ...
+r, tg, notes, st = db_setup(t0=at(3, 14, 20))
+r.tg = MultiTG()
+run(r.schedule_from_command("/yoz Muhammad Akam | ertaga 10:00 | Assalomu alaykum, aka!\nServer to'lovi haqida eslatma."))
+rows = run(r.db.query("SELECT * FROM scheduled"))
+check(len(rows) == 1 and rows[0]["chat"] == 6046141246 and rows[0]["send_at"] == at(4, 10, 0) and rows[0]["text"] == "Assalomu alaykum, aka!\nServer to'lovi haqida eslatma.",
+      "/yoz: resolved person, 10:00 Tashkent time tomorrow (= 05:00 UTC), text kept exactly (line breaks too)")
+check(rows[0]["send_at"] == int(_dt.datetime(2026, 11, 4, 5, 0, tzinfo=_dt.timezone.utc).timestamp()), "10:00 UTC+5 is stored as 05:00 UTC")
+check("#1 rejalashtirildi" in notes[-1] and "04.11.2026 10:00" in notes[-1] and "/bekor 1" in notes[-1], "confirmation shows id, person, time and how to cancel")
+run(r.run_scheduled())
+check(not [m for m in r.tg.chats[6046141246] if m.out], "nothing is sent before its time")
+clock[0] = at(4, 10, 0) + 5
+notes.clear()
+run(r.run_scheduled())
+sent = [m for m in r.tg.chats[6046141246] if m.out]
+check(len(sent) == 1 and sent[0].text == rows[0]["text"] and "🤖" not in sent[0].text and sent[0].id not in r.our_ids, "at its time: sent as YOUR message, exactly as written, no signature")
+check(run(r.db.query("SELECT status FROM scheduled"))[0]["status"] == "sent" and any("#1 yuborildi" in x for x in notes), "marked sent, you are told")
+run(r.run_scheduled())
+check(len([m for m in r.tg.chats[6046141246] if m.out]) == 1, "never sent twice")
+
+# --- overdue (server was down) / failure / cancel / list
+r, tg, notes, st = db_setup(t0=at(3, 14, 20))
+r.tg = MultiTG()
+run(r.schedule_from_command("/yoz Brother | 15:00 | salom"))
+clock[0] = at(3, 15, 0) + 7 * 3600
+notes.clear()
+run(r.run_scheduled())
+check(not [m for m in r.tg.chats[5] if m.out] and any("vaqtida yuborilmadi" in x for x in notes) and run(r.db.query("SELECT status FROM scheduled"))[0]["status"] == "missed",
+      "more than 6 hours late -> NOT sent, you are told")
+r, tg, notes, st = db_setup(t0=at(3, 14, 20))
+r.tg = MultiTG()
+
+
+async def boom(chat, text):
+    raise OSError("network")
+
+
+run(r.schedule_from_command("/yoz Brother | 15:00 | salom"))
+r.tg.send = boom
+clock[0] = at(3, 15, 1)
+notes.clear()
+run(r.run_scheduled())
+check(run(r.db.query("SELECT status, note FROM scheduled"))[0] == {"status": "failed", "note": "OSError"} and any("yuborilmadi" in x for x in notes), "send fails -> marked failed, you are told")
+r, tg, notes, st = db_setup(t0=at(3, 14, 20))
+r.tg = MultiTG()
+run(r.schedule_from_command("/yoz Brother | ertaga 09:00 | bir"))
+run(r.schedule_from_command("/yoz Muhammad Akam | 2 soatdan keyin | ikki"))
+notes.clear()
+run(r.list_scheduled())
+check("#1" in notes[-1] and "#2" in notes[-1] and "Brother" in notes[-1] and "Muhammad Akam" in notes[-1], "list shows what is waiting")
+run(r.cancel_scheduled(1))
+clock[0] = at(4, 9, 1)
+run(r.run_scheduled())
+check(not [m for m in r.tg.chats[5] if m.out] and run(r.db.query("SELECT status FROM scheduled WHERE id=1"))[0]["status"] == "cancelled", "cancelled messages are never sent")
+notes.clear()
+run(r.cancel_scheduled(77))
+check("topilmadi" in notes[-1], "cancel of an unknown / already sent id says so")
+
+# --- mistakes are caught
+for bad, why in (("/yoz Brother | ertaga 10:00", "missing text"), ("/yoz Brother | vaqt emas | salom", "bad time"), ("/yoz Brother | bugun 14:00 | salom", "time in the past"),
+                 ("/yoz Nonexistent | ertaga 10:00 | salom", "unknown person"), ("/yoz Akam | ertaga 10:00 | salom", "ambiguous person")):
+    r, tg, notes, st = db_setup(t0=at(3, 14, 20))
+    r.tg = MultiTG()
+    run(r.schedule_from_command(bad))
+    check(not run(r.db.query("SELECT * FROM scheduled")) and notes, f"/yoz with {why} -> nothing scheduled, you are told")
+
+# --- natural words through Claude: the text must be exactly yours
+r, tg, notes, st, prompts = owner_setup({"action": "schedule", "target": "Muhammad Akam", "message": "Aka, ertaga serverga to'lov qilib qo'ying.", "at": "2026-11-04 10:00"})
+r.db = store.SqliteDb(":memory:")
+run(r.db.init())
+r.tg = MultiTG()
+clock[0] = at(3, 14, 20)
+run(r.on_owner_message("Muhammad Akamga ertaga soat 10 da yoz: Aka, ertaga serverga to'lov qilib qo'ying."))
+rows = run(r.db.query("SELECT * FROM scheduled"))
+check(len(rows) == 1 and rows[0]["chat"] == 6046141246 and rows[0]["send_at"] == at(4, 10, 0) and "EXACTLY the text" in prompts[0][0] and "2026-11-03" in prompts[0][0],
+      "plain words -> Claude fills person/text/time (it is given today's date), exact text scheduled")
+r, tg, notes, st, prompts = owner_setup({"action": "schedule", "target": "Brother", "message": "salom", "minutes": 90})
+r.db = store.SqliteDb(":memory:")
+run(r.db.init())
+r.tg = MultiTG()
+clock[0] = at(3, 14, 20)
+run(r.on_owner_message("brotherga 1.5 soatdan keyin salom de"))
+check(run(r.db.query("SELECT send_at FROM scheduled"))[0]["send_at"] == at(3, 15, 50), "'in 90 minutes' via Claude")
+r, tg, notes, st, prompts = owner_setup({"action": "schedule", "target": "Brother", "message": "", "at": "2026-11-04 10:00"})
+run(r.on_owner_message("brotherga yoz"))
+check(not tg.sent, "a schedule plan without text is not accepted")
+r, tg, notes, st, prompts = owner_setup({"action": "cancel_scheduled", "id": 5})
+r.db = store.SqliteDb(":memory:")
+run(r.db.init())
+run(r.on_owner_message("5 ni bekor qil"))
+check(any("#5" in x for x in notes), "cancel by id through Claude")
+check(lite.SCHED_CMD.match("/yoz a | b | c") and lite.LIST_SCHED.fullmatch(lite.norm("/rejalar")) and lite.CANCEL_SCHED.fullmatch(lite.norm("/bekor 12")).group(1) == "12"
+      and not lite.CANCEL_SCHED.fullmatch(lite.norm("bekor")), "command words (/yoz, /rejalar, /bekor N)")
+
+# --- everything important survives a restart (kept in the database)
+r, tg, notes, st = db_setup(t0=at(3, 20, 0))
+run(r.apply_mode("night"))
+run(r.attention(5, "Brother", "xabar", "🙋 Brother kutyapti"))
+run(r.on_message(6, tg.add("salom"), Sender(name="Otabek Akam", id=62)))
+run(r.save())
+r2, tg2, n2, st2 = mode_setup(t0=at(3, 20, 5))
+r2.db = r.db
+run(r2.load())
+check(r2.effective().kind == "night" and 5 in r2.pending and r2.pending[5]["text"] == "xabar" and 6 in r2.night_log and r2.names.get(5) == "Brother" and r2.last_chat == 5,
+      "mode, who is waiting for your answer, the night list and names are restored after a restart")
+check(r2.last_kind == "night", "...and a restart does not trigger a fake 'work started' summary")
+n_before = run(r2.db.query("SELECT v FROM kv WHERE k='state'"))
+run(r2.save())
+check(run(r2.db.query("SELECT v FROM kv WHERE k='state'")) == n_before, "unchanged state is not rewritten")
+r3, tg3, n3, st3 = mode_setup()
+r3.db = store.SqliteDb(":memory:")
+run(r3.db.init())
+run(r3.db.kv_set("state", "{broken"))
+run(r3.load())
+check(r3.effective().kind == "work", "damaged saved state is ignored")
+
+
+class DownDb(store.Db):
+    async def query(self, *a):
+        raise store.DbError("Turso unreachable")
+
+    async def execute(self, *a):
+        raise store.DbError("Turso unreachable")
+
+
+r4, tg4, n4, st4 = mode_setup()
+r4.db = DownDb()
+try:
+    run(r4.tick())
+    crashed = False
+except Exception:
+    crashed = True
+check(not crashed, "a database outage never crashes the minute loop")
+run(r4.attention(5, "Brother", "x", "🙋"))
+check(len(r4.pending) == 1 and r4.effective().kind == "work", "...and the bot keeps working in memory while the database is down")
+
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
