@@ -41,13 +41,17 @@ async def instant(_):
 
 
 def make(claude=None, **kw):
-    tg, notes = FakeTG(), []
+    tg, notes, quiet = FakeTG(), [], []
 
-    async def notify(t):
+    async def notify(t, silent=False):
         notes.append(t)
+        if silent:
+            quiet.append(t)
     d = tempfile.mkdtemp()
+    kw.setdefault("work_hours", "off")                      # tests do not depend on the real clock
     st = Settings(grace=0, contacts_file=os.path.join(d, "c.txt"), info_file=os.path.join(d, "i.txt"), **kw)
     r = Responder(st, tg, notify, claude, sleep=instant, log=lambda m: None)
+    r.silent_notes = quiet
     return r, tg, notes, st
 
 
@@ -202,7 +206,7 @@ for bad in (good[:300], good + "x", "2" + "A" * 352, ""):
     except SystemExit as e:
         check("damaged" in str(e) and "353" in str(e), f"damaged TG_SESSION ({len(bad)} chars) -> clear message")
 
-check(Settings().grace == 240 and Settings.from_env({}).grace == 240 and Settings.from_env({"GRACE_SECONDS": "60"}).grace == 60, "default wait is 4 minutes (GRACE_SECONDS can change it)")
+check(Settings().grace == 900 and Settings.from_env({}).grace == 900 and Settings.from_env({"GRACE_SECONDS": "60"}).grace == 60, "default wait is 15 minutes (GRACE_SECONDS can change it)")
 waits = []
 
 
@@ -211,10 +215,10 @@ async def record(sec):
 
 
 r3, tg3, n3, st3 = make(fake_claude)
-st3.grace = 240
+st3.grace = 900
 r3.sleep = record
 run(r3.on_message(5, tg3.add("salom"), bro))
-check(waits and 240 <= waits[0] <= 260 and len(tg3.sent) == 1, f"waits about 4 minutes before answering ({waits[0]:.0f}s)")
+check(waits and 900 <= waits[0] <= 920 and len(tg3.sent) == 1, f"waits about 15 minutes before answering ({waits[0]:.0f}s)")
 tg3.msgs.clear(); waits.clear()
 mid = tg3.add("savol")
 orig_sleep = r3.sleep
@@ -228,7 +232,7 @@ async def owner_answers(sec):                                   # you reply duri
 r3.sleep = owner_answers
 n = len(tg3.sent)
 run(r3.on_message(6, mid, bro))
-check(len(tg3.sent) == n and waits, "you answer within the 4 minutes -> Jarvis stays quiet")
+check(len(tg3.sent) == n and waits, "you answer within the 15 minutes -> Jarvis stays quiet")
 
 # ---- Muhammad Akam: card number / amount (card lives only in env, never in the code)
 CARD = "0000 1111 2222 3333"                                   # a made-up number for the test
@@ -305,7 +309,7 @@ async def notify_check():
     sent_bot, sent_me = [], []
 
     class C:
-        async def send_message(self, who, text):
+        async def send_message(self, who, text, silent=False):
             sent_me.append(text)
 
     import urllib.request as ur
@@ -557,11 +561,11 @@ def multi_setup(plans):
 
     notes = []
 
-    async def notify(x):
+    async def notify(x, silent=False):
         notes.append(x)
     tg = MultiTG()
     d = tempfile.mkdtemp()
-    st = Settings(grace=0, contacts_file=os.path.join(d, "c.txt"), info_file=os.path.join(d, "i.txt"))
+    st = Settings(grace=0, work_hours="off", contacts_file=os.path.join(d, "c.txt"), info_file=os.path.join(d, "i.txt"))
     r = Responder(st, tg, notify, claude_multi, sleep=yielding_sleep, log=lambda m: None)
     r.now = lambda: clock[0]
     return r, tg, notes, prompts
@@ -625,6 +629,172 @@ sig_id = tg.add(5, "Zufarbek band.\n\n🤖 Jarvis (avto-javob)", out=True)
 run(r.on_owner_message("brotherga yuborganingni o'chir"))
 check(tg.deleted == [(5, [sig_id])], "after a restart it still finds only the messages that carry the assistant's mark")
 check(lite.parse_plan('{"action": "delete_last", "target": "Brother"}')["target"] == "Brother" and lite.parse_plan('{"action": "send", "message": "x"}')["target"] == "", "plan parsing: target and delete_last")
+
+# ================= modes: 15 minutes, night ("uxladim"), work, busy, schedule, morning summary =================
+import datetime as _dt  # noqa: E402
+import modes  # noqa: E402
+
+TZ = _dt.timezone(_dt.timedelta(hours=5))
+at = lambda day, h, m=0: _dt.datetime(2026, 11, day, h, m, tzinfo=TZ).timestamp()  # noqa: E731   (2 Nov 2026 = Monday)
+SCHED = "mon,wed,fri 16:00-18:00; tue,thu,sat 17:00-19:30"
+
+sc = modes.parse_schedule(SCHED)
+check(sc.is_open(_dt.datetime(2026, 11, 2, 16, 30, tzinfo=TZ)) and not sc.is_open(_dt.datetime(2026, 11, 2, 18, 0, tzinfo=TZ))
+      and sc.is_open(_dt.datetime(2026, 11, 3, 17, 0, tzinfo=TZ)) and not any(sc.is_open(_dt.datetime(2026, 11, 8, h, 0, tzinfo=TZ)) for h in range(24)),
+      "schedule: Mon/Wed/Fri 16-18, Tue/Thu/Sat 17-19:30, Sunday closed")
+check(modes.parse_schedule("off") is None and modes.parse_schedule("") is None and modes.parse_schedule("garbage") is None, "WORK_HOURS=off / garbage -> no schedule")
+check(sc.describe() == "dushanba/chorshanba/juma 16:00–18:00; seshanba/payshanba/shanba 17:00–19:30", "schedule is described in Uzbek")
+check(modes.next_phrase(sc, _dt.datetime(2026, 11, 2, 18, 30, tzinfo=TZ), "uz") == "Ertaga soat 17:00 dan keyin"
+      and modes.next_phrase(sc, _dt.datetime(2026, 11, 7, 20, 0, tzinfo=TZ), "uz") == "Dushanba kuni soat 16:00 dan keyin"
+      and modes.next_phrase(sc, _dt.datetime(2026, 11, 2, 10, 0, tzinfo=TZ), "en") == "today after 16:00", "'next time he answers' phrases")
+
+
+def mode_setup(sched=None, t0=None, claude=fake_claude):
+    r, tg, notes, st = make(claude, work_hours=sched or "off")
+    r.now = lambda: clock[0]
+    clock[0] = t0 if t0 is not None else at(2, 17, 0)
+    r.last_kind = r.effective().kind                          # like a real start: remember the mode we begin in
+    return r, tg, notes, st
+
+
+# --- 1) work hours, nobody answers for 15 minutes -> "busy" (the AI knows it)
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+st.grace = 900
+seen.clear()
+run(r.on_message(5, tg.add("dars soat nechada?"), bro))
+check(len(tg.sent) == 1 and "really is busy right now" in seen[0][0] and "about 15 minutes" in seen[0][0], "in work hours the AI is told he did not answer for 15 minutes, so he really is busy")
+
+# --- 2) night: "uxladim"
+r, tg, notes, st = mode_setup()
+run(r.apply_mode("night"))
+check(r.effective().kind == "night" and notes and "Tungi rejim yoqildi" in notes[0] and r.silent_notes, "'uxladim' -> night mode, confirmation arrives silently")
+seen.clear()
+run(r.on_message(5, tg.add("salom, ertaga dars bormi?"), bro))
+check(len(tg.sent) == 1 and "bugungi ish vaqti tugagani" in tg.sent[0] and "Ertaga o'zi sizga javob beradi" in tg.sent[0] and not seen,
+      "night: 'today's working time is over, he will answer tomorrow' (fixed text, no AI call)")
+run(r.on_message(5, tg.add("hoy javob ber"), bro))
+check(len(tg.sent) == 1, "night: the same person is told only once")
+run(r.on_message(6, tg.add("hello there"), Sender(name="Random Person", id=61, contact=False)))
+check(len(tg.sent) == 2 and "working hours are over for today" in tg.sent[-1], "night: a stranger is told too, in English for English")
+run(r.on_message(7, tg.add("", kind="voice"), Sender(name="Otabek Akam", id=62)))
+check(len(tg.sent) == 3 and "ish vaqti tugagani" in tg.sent[-1], "night: a voice message gets the same sentence")
+quiet_before = len(r.silent_notes)
+run(r.attention(9, "Brother", "xabar", "🙋 Brother kutyapti"))
+check(len(r.silent_notes) == quiet_before + 1, "night: notes to your phone are silent")
+
+# --- 3) parents at night: polite sentence, silent note
+r, tg, notes, st = mode_setup()
+run(r.apply_mode("night"))
+run(r.on_message(5, tg.add("o'g'lim, uxladingmi?"), dad))
+check(len(tg.sent) == 1 and tg.sent[0].startswith("Assalomu alaykum, dadajon!") and "uxlayapti" in tg.sent[0] and "Zufarbek" in tg.sent[0], "night: Dad gets a polite message (third person, 'dadajon')")
+check(any("Dadajonim yozdi" in x for x in r.silent_notes), "night: your note about Dad is silent")
+r2, tg2, n2, st2 = mode_setup()
+run(r2.apply_mode("night"))
+run(r2.on_message(6, tg2.add("o'g'lim"), mom))
+check(tg2.sent and tg2.sent[0].startswith("Assalomu alaykum, ayajon!"), "night: Mom is addressed as 'ayajon'")
+r3, tg3, n3, st3 = mode_setup()
+run(r3.on_message(6, tg3.add("o'g'lim"), mom))
+check(not tg3.sent and any("Ayajonim" in x and "yozdi" in x for x in n3) and not r3.silent_notes, "daytime: parents still get NOTHING from Jarvis, and the note rings")
+
+# --- 4) back to work + morning summary
+r, tg, notes, st = mode_setup()
+run(r.apply_mode("night"))
+run(r.on_message(5, tg.add("salom, ertaga dars bormi?"), bro))
+run(r.on_message(6, tg.add("o'g'lim"), dad))
+notes.clear()
+run(r.apply_mode("work"))
+check(r.effective().kind == "work" and notes and "Ish rejimi yoqildi" in notes[0] and "2 kishi yozdi" in notes[0] and "Brother (1)" in notes[0] and "dars bormi" in notes[0] and "Dadajonim" in notes[0], "work: morning summary lists who wrote at night")
+check(notes[0] not in r.silent_notes, "...and it is not silent")
+notes.clear()
+run(r.apply_mode("work"))
+check(any("allaqachon" in x for x in notes), "work when already working -> says so")
+seen.clear(); n = len(tg.sent)
+run(r.on_message(5, tg.add("yana savol"), bro))
+check(len(tg.sent) == n + 1 and seen, "back to work: normal AI answers again")
+
+# --- 5) timed busy mode
+r, tg, notes, st = mode_setup(None, at(2, 15, 0))
+run(r.apply_mode("busy", minutes=120, note="dars o'tmoqda"))
+check(r.effective().kind == "busy" and any("soat 17:00 gacha" in x for x in notes), "busy for 2 hours -> confirmed with the end time")
+run(r.on_message(5, tg.add("salom"), bro))
+check(len(tg.sent) == 1 and "hozir band (dars o'tmoqda)" in tg.sent[0] and "Soat 17:00 dan keyin" in tg.sent[0], "busy: 'busy (dars o'tmoqda), answers after 17:00'")
+clock[0] = at(2, 17, 5)
+notes.clear()
+run(r.tick())
+check(r.effective().kind == "work" and any("Ish rejimi yoqildi" in x and "Brother" in x for x in notes), "busy time over -> back to work by itself, with a summary")
+r, tg, notes, st = mode_setup(None, at(2, 15, 0))
+run(r.apply_mode("busy", until_str="17:30", note="yig'ilish"))
+check(r.override["until"] == at(2, 17, 30), "busy 'until 17:30'")
+r, tg, notes, st = mode_setup(None, at(2, 18, 0))
+run(r.apply_mode("busy", until_str="17:30"))
+check(r.override["until"] == at(3, 17, 30), "busy 'until 17:30' said at 18:00 -> tomorrow")
+
+# --- 6) the schedule works by itself
+r, tg, notes, st = mode_setup(SCHED, at(2, 12, 0))
+check(r.effective().kind == "night" and r.effective().reason == "hours", "outside work hours -> night (by schedule)")
+run(r.on_message(5, tg.add("salom"), bro))
+check("hozir ish vaqtida emas" in tg.sent[0] and "Bugun soat 16:00 dan keyin" in tg.sent[0], "out of hours: 'not working now, answers today after 16:00'")
+clock[0] = at(2, 16, 1)
+notes.clear()
+run(r.tick())
+check(r.effective().kind == "work" and any("Ish rejimi yoqildi" in x and "Brother" in x for x in notes), "work hours start by themselves -> summary")
+clock[0] = at(2, 18, 1)
+notes.clear()
+run(r.tick())
+check(r.effective().kind == "night" and any("Ish vaqti tugadi" in x for x in notes), "work hours end by themselves -> night, you are told")
+clock[0] = at(2, 12, 0)
+r, tg, notes, st = mode_setup(SCHED, at(2, 12, 0))
+run(r.apply_mode("work"))
+check(r.effective().kind == "work", "'ish vaqtim boshlandi' outside the schedule -> work until the next scheduled change")
+clock[0] = at(2, 18, 30)
+check(r.effective().kind == "night", "...then the schedule takes over again")
+r, tg, notes, st = mode_setup(SCHED, at(2, 17, 0))
+run(r.apply_mode("night"))
+check(r.effective().kind == "night" and r.effective().reason == "manual", "'uxladim' during work hours -> night now")
+clock[0] = at(3, 17, 30)
+check(r.effective().kind == "work", "...and the next scheduled window (tomorrow) switches it back")
+
+# --- 7) reminders pause at night and restart in the morning
+r, tg, notes, st = mode_setup()
+run(r.attention(5, "Brother", "xabar", "🙋 Brother kutyapti"))
+run(r.apply_mode("night"))
+clock[0] += 90 * 60
+notes.clear()
+run(r.check_reminders())
+check(not notes, "night: no reminders")
+run(r.apply_mode("work"))
+clock[0] += 61
+notes.clear()
+run(r.check_reminders())
+check(any("Javob berasizmi" in x for x in notes), "work again: the reminder about the unanswered person comes within a minute")
+
+# --- 8) the mode survives a restart (kept in Saved Messages)
+saved = []
+
+
+async def save_state(text):
+    saved.append(text)
+
+
+r, tg, notes, st = mode_setup()
+tg.save_state = save_state
+run(r.apply_mode("night"))
+r2, tg2, n2, st2 = mode_setup()
+r2.restore(saved[-1])
+check(saved and r2.effective().kind == "night", "night mode is restored after a restart")
+r2.restore("not json")
+check(r2.effective().kind == "night", "damaged saved state is ignored")
+
+# --- 9) Claude understands free wording for modes
+r, tg, notes, st, prompts = owner_setup({"action": "set_mode", "mode": "busy", "minutes": 120, "note": "dars", "reply": ""})
+run(r.on_owner_message("darsdaman 2 soat"))
+check(r.effective().kind == "busy" and "Current local time" in prompts[0][0] and not tg.sent, "'darsdaman 2 soat' (via Claude) -> busy mode")
+r, tg, notes, st, prompts = owner_setup({"action": "set_mode", "mode": "teleport"})
+run(r.on_owner_message("nimadir"))
+check(r.effective().kind == "work", "an unknown mode from Claude is ignored")
+check(lite.MODE_NIGHT.match(lite.norm("Uxladim")) and lite.MODE_NIGHT.match(lite.norm("good night")) and lite.MODE_WORK.match(lite.norm("Ish vaqtim boshlandi"))
+      and lite.MODE_WORK.match(lite.norm("uyg'ondim")) and not lite.MODE_NIGHT.match(lite.norm("uxlab qoldi")), "quick command words")
+check(Settings.from_env({}).work_hours == modes.DEFAULT_WORK_HOURS and Settings.from_env({"WORK_HOURS": "off"}).work_hours == "off" and Settings.from_env({"TZ_OFFSET": "3"}).tz_hours == 3, "WORK_HOURS / TZ_OFFSET settings")
 
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)

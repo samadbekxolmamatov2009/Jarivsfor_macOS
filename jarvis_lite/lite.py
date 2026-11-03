@@ -7,7 +7,7 @@
 * Claude reads the message and answers in the sender's language, using the facts in info.txt
 * voice messages: one fixed reply ("... is busy, will answer himself in a few minutes")
 * private chats only; never money/password/code/emergency topics (those are forwarded to YOU instead);
-  3 replies per chat per hour, 40 a day; waits ~4 minutes first (GRACE_SECONDS=240) so that if you answer yourself it stays quiet
+  3 replies per chat per hour, 40 a day; waits ~15 minutes first (GRACE_SECONDS=900) so that if you answer yourself it stays quiet
 * every reply is marked "🤖 Jarvis (avto-javob)" and a copy is sent to your phone (Telegram bot), or Saved Messages
 Settings: environment file, see env.example.   Edit contacts.txt / info.txt any time — they are re-read for every message.
 """
@@ -23,6 +23,9 @@ import urllib.request
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
+import datetime
+
+import modes
 from langdetect import detect as detect_lang
 
 # ------------------------------------------------------------------ texts
@@ -51,6 +54,8 @@ AMOUNT_INTENT = re.compile(
     r"\b(?:qancha|necha\s*(?:pul|dollar|so'm)?|summa\w*|miqdor\w*|narx\w*|how\s+much|сколько|сумм\w*)\b|dollar\w*|\$", re.I)
 # you write this to your bot to say "I will not answer, stop reminding me"
 DISMISS = re.compile(r"\s*/?(?:yo'?q|yoq|нет|no|skip|stop|bekor(?:\s+qil)?)\s*[.!]*\s*", re.I)   # the WHOLE message ("yo'q")
+MODE_NIGHT = re.compile(r"\s*(?:uxladim|uxlayman|uxlashga ketdim|yotdim|yotaman|tungi rejim|good ?night|спокойной ночи)\b", re.I)
+MODE_WORK = re.compile(r"\s*(?:ish vaqtim boshlandi|ish boshlandi|ish boshladim|ish rejimi|uyg'?ondim|uygondim|good ?morning|доброе утро)\b", re.I)
 TAG = re.compile(r"🔖\s*(-?\d+)")                # every note to your phone ends with 🔖 <chat id>: tells which person it is about
 OWNER_MARK = "[[OWNER]]"            # Claude adds it when only the owner can answer; it never reaches the other person
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
@@ -76,7 +81,9 @@ class Settings:
     owner_full: str = "Zufarbek Jumayev"
     model: str = "claude-haiku-5-5"
     lang_mode: str = "auto"          # auto | en | llm
-    grace: float = 240.0             # seconds to wait before answering (4 minutes: you may answer yourself meanwhile)
+    grace: float = 900.0             # seconds to wait before answering (15 minutes: you may answer yourself; then you are "really busy")
+    work_hours: str = modes.DEFAULT_WORK_HOURS     # WORK_HOURS="off" = no schedule (only your own commands)
+    tz_hours: float = 5.0            # TZ_OFFSET: your time zone, hours from UTC (Uzbekistan = 5)
     contacts_file: str = "contacts.txt"
     info_file: str = "info.txt"
     contacts_env: str = ""           # CONTACTS="Brother;Otabek Akam;@aziz"  (Render: no disk, so settings live in env vars)
@@ -98,7 +105,8 @@ class Settings:
         d = env.get("DATA_DIR", ".")
         return cls(owner=env.get("OWNER_NAME", "Zufarbek"), owner_full=env.get("OWNER_FULL_NAME", "Zufarbek Jumayev"),
                    model=env.get("AUTOREPLY_MODEL", "claude-haiku-5-5"), lang_mode=env.get("AUTOREPLY_LANG", "auto").lower(),
-                   grace=float(env.get("GRACE_SECONDS", "240")), persona=env.get("AUTOREPLY_PERSONA", ""),
+                   grace=float(env.get("GRACE_SECONDS", "900")),
+                   work_hours=env.get("WORK_HOURS", modes.DEFAULT_WORK_HOURS), tz_hours=float(env.get("TZ_OFFSET", "5")), persona=env.get("AUTOREPLY_PERSONA", ""),
                    contacts_file=os.path.join(d, "contacts.txt"), info_file=os.path.join(d, "info.txt"),
                    contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""),
                    pay_contact=env.get("PAY_CONTACT", "Muhammad Akam"), pay_card=env.get("PAY_CARD", "").strip(),
@@ -182,7 +190,13 @@ class Responder:
     `notify(text)` is async. `claude(system, user)` is async and returns text or None."""
 
     def __init__(self, settings, tg, notify, claude=None, sleep=asyncio.sleep, log=print):
-        self.s, self.tg, self.notify, self.claude, self.sleep, self.log = settings, tg, notify, claude, sleep, log
+        self.s, self.tg, self._raw_notify, self.claude, self.sleep, self.log = settings, tg, notify, claude, sleep, log
+        self.sched = modes.parse_schedule(settings.work_hours, settings.tz_hours)
+        self.tz = datetime.timezone(datetime.timedelta(hours=settings.tz_hours))
+        self.override = None                    # your manual mode (night / work / busy) until its end
+        self.session = 0                        # changes with every mode change: "told this person already in this period"
+        self.replied_session, self.night_log = {}, {}
+        self.last_kind = "work"
         self.handled = {}                       # chat -> highest incoming message id already dealt with
         self.our_ids = set()                    # ids of messages WE sent (everything else outgoing is you)
         self.sent = defaultdict(deque)
@@ -196,6 +210,8 @@ class Responder:
         self.owner_buf, self.owner_busy = [], False
         self.owner_sent, self.owner_sent_at = defaultdict(list), {}     # what the assistant sent on your orders (to avoid duplicates / to take back)
         self.owner_hist = deque(maxlen=10)      # your conversation with the bot (so "oziga ayt" after "javob bermayman" works)
+
+        self.last_kind = self.effective().kind        # so the first tick() only reports REAL changes
 
     # ---- entry point: called for every incoming private message from an allowed person
     async def on_message(self, chat, msg_id, sender):
@@ -218,7 +234,11 @@ class Responder:
         return any(not m.out and m.id > self.handled.get(chat, 0) for m in await self.tg.recent(chat, 12))
 
     async def process(self, chat, sender):
-        await self.sleep(self.s.grace + random.uniform(0, 20))      # ~4 minutes: you may answer first
+        if self.effective().kind == "work":
+            await self.sleep(self.s.grace + random.uniform(0, 20))  # ~15 minutes: you may answer first; no answer = you really are busy
+        else:
+            await self.sleep(random.uniform(5, 15))                 # night / busy: you already said you are not available
+        mode = self.effective()
         msgs = await self.tg.recent(chat, 12)
         new = [m for m in msgs if not m.out and m.id > self.handled.get(chat, 0)]
         if not new:
@@ -234,10 +254,14 @@ class Responder:
         now = time.time()
         rel = self.relation(sender)
         if rel == "parent":
-            return await self.handle_parent(chat, name, new, texts)
+            return await self.handle_parent(chat, name, new, texts, mode)
         if rel == "stranger":
+            if mode.kind != "work":
+                return await self.handle_off_mode(chat, name, new, texts, mode, now, stranger=True)
             return await self.handle_stranger(chat, name, new, texts, now)
         if not texts:
+            if mode.kind != "work":
+                return await self.handle_off_mode(chat, name, new, texts, mode, now)
             if any(m.kind == "voice" for m in new):
                 return await self.voice(chat, name, now)
             return await self.attention(chat, name, "(fayl/rasm)", f"📎 {name} fayl/rasm yubordi (matnsiz) — o'zingiz ko'ring.")
@@ -251,6 +275,10 @@ class Responder:
                                           tell=f"💳 {name} karta/summani so'radi — men yubordim.",
                                           shown="(karta raqami / summa yuborildi)" if kind == "card" else None, attn=False)
             await self.attention(chat, name, text, f"💬 {name} ({self.s.pay_for}) boshqa narsa yozdi — ko'ring:\n{text[:300]}")
+        if mode.kind != "work":                              # night / busy: one polite "not available" sentence, nothing else
+            if SENSITIVE.search(text):
+                await self.attention(chat, name, text, f"⚠️ {name} men javob bermaydigan mavzuda yozdi (pul/parol/zudlik) — o'zingiz ko'ring:\n{text[:300]}")
+            return await self.handle_off_mode(chat, name, new, texts, mode, now)
         if SENSITIVE.search(text):
             return await self.attention(chat, name, text, f"⚠️ {name} men javob bermaydigan mavzuda yozdi (pul/parol/zudlik) — o'zingiz ko'ring:\n{text[:300]}")
         if not self.budget(chat, now):
@@ -272,14 +300,41 @@ class Responder:
             return "known"
         return "stranger"
 
-    async def handle_parent(self, chat, name, new, texts):
-        """Dad / Mom: Jarvis never writes to them. You are told at once (and reminded if you do not answer)."""
+    async def handle_parent(self, chat, name, new, texts, mode=None):
+        """Dad / Mom: normally Jarvis never writes to them, you are told at once (and reminded if you do not answer).
+        At night he writes ONE polite sentence to them, and your note arrives silently."""
+        mode = mode or modes.Mode("work")
+        label = "\n".join(texts) if texts else ("(ovozli xabar)" if any(m.kind == "voice" for m in new) else "(fayl/rasm)")
+        if mode.kind != "work":
+            self.log_night(chat, name, label)
+        if mode.kind == "night" and self.replied_session.get(chat) != self.session:
+            self.replied_session[chat] = self.session
+            self.night_log[chat]["replied"] = True
+            return await self.deliver(chat, name, label, modes.parent_reply(mode, name, self.s.owner),
+                                      tell=f"👪 {name} yozdi — nazokatli javob berdim:\n«{label[:300]}»")
         if texts:
             text = "\n".join(texts)
             return await self.attention(chat, name, text, f"👪 {name} yozdi — o'zingiz javob bering:\n{text[:300]}")
         if any(m.kind == "voice" for m in new):
             return await self.attention(chat, name, "(ovozli xabar)", f"🎤 {name} ovozli xabar yubordi — o'zingiz eshiting.")
         return await self.attention(chat, name, "(fayl/rasm)", f"📎 {name} fayl/rasm yubordi — o'zingiz ko'ring.")
+
+    async def handle_off_mode(self, chat, name, new, texts, mode, now, stranger=False):
+        """Night / busy: tell the person once (per period) that you are not available — in their language."""
+        voice = any(m.kind == "voice" for m in new)
+        label = "\n".join(texts) if texts else ("(ovozli xabar)" if voice else "(fayl/rasm)")
+        self.log_night(chat, name, label)
+        if self.replied_session.get(chat) == self.session:
+            return                                           # already told this period
+        if not texts and not voice:
+            return                                           # a photo/file with no text: noted for your summary only
+        if stranger and (not self.stranger_budget(chat, now) or (texts and SENSITIVE.search(label))):
+            return
+        lang = "en" if self.s.lang_mode == "en" else (detect_lang(label) if texts else "uz")
+        reply = modes.mode_reply(mode, lang, self.s.owner, self.sched, self.local())
+        self.replied_session[chat] = self.session
+        self.night_log[chat]["replied"] = True
+        await self.deliver(chat, name, label, reply, stranger=stranger)
 
     def stranger_budget(self, chat, now):
         q = self.stranger_sent[chat]
@@ -355,8 +410,124 @@ class Responder:
             self.pending[chat] = {"name": name, "text": text, "last_in": last_in, "times": 0,
                                   "next": self.now() + self.s.remind_after}
 
+    # ---- modes: work / night / busy
+    async def notify(self, text):
+        """Notes to your phone. At night they arrive silently (no sound), you read them in the morning."""
+        if self._raw_notify is None:
+            return
+        if self.effective().kind == "night":
+            return await self._raw_notify(text, silent=True)
+        return await self._raw_notify(text)
+
+    def local(self):
+        return datetime.datetime.fromtimestamp(self.now(), self.tz)
+
+    def effective(self):
+        now = self.now()
+        ov = self.override
+        if ov:
+            end = ov.get("until") or ov.get("boundary")
+            if end and now >= end:
+                self.override = ov = None                    # your manual mode ran out (busy time over / next schedule change)
+        if ov:
+            return modes.Mode(ov["kind"], "manual", ov.get("note", ""), ov.get("until"))
+        if self.sched and not self.sched.is_open(self.sched.local(now)):
+            return modes.Mode("night", "hours")
+        return modes.Mode("work")
+
+    def set_mode(self, kind, until=None, note=""):
+        boundary = None
+        if kind in ("night", "work") and self.sched:         # "uxladim" / "ish boshlandi" last until the next scheduled change
+            nc = self.sched.next_change(self.sched.local(self.now()))
+            boundary = nc.timestamp() if nc else None
+        if kind == "work" and not self.sched:
+            self.override = None
+        else:
+            self.override = {"kind": kind, "until": until, "boundary": boundary, "note": note}
+        self.session += 1
+        self.replied_session = {}
+
+    async def apply_mode(self, kind, minutes=None, until_str=None, note=""):
+        """You said «uxladim» / «ish vaqtim boshlandi» / «darsdaman 2 soat» ..."""
+        before = self.effective().kind
+        until = None
+        if kind == "busy":
+            now = self.now()
+            if minutes:
+                until = now + float(minutes) * 60
+            elif until_str and re.fullmatch(r"\d{1,2}:\d{2}", until_str.strip()):
+                h, m = map(int, until_str.strip().split(":"))
+                t = self.local().replace(hour=h % 24, minute=m, second=0, microsecond=0)
+                if t.timestamp() <= now:
+                    t += datetime.timedelta(days=1)
+                until = t.timestamp()
+            else:
+                until = now + 3600
+        self.set_mode(kind, until, note)
+        await self.save()
+        if kind == "night":
+            await self.notify("🌙 Tungi rejim yoqildi. Yozganlarga «bugungi ish vaqti tugadi, ertaga o'zi javob beradi» deyman; "
+                              "xabarlar sizga ovozsiz keladi. «Ish vaqtim boshlandi» desangiz qaytaman.")
+        elif kind == "busy":
+            till = datetime.datetime.fromtimestamp(until, self.tz).strftime("%H:%M")
+            await self.notify(f"⏳ Band rejim yoqildi{f' ({note})' if note else ''} — soat {till} gacha. Yozganlarga shuni aytaman, "
+                              f"shundan keyin o'zim odatdagi rejimga qaytaman.")
+        await self.tick()
+        if kind == "work" and before == "work":
+            await self.notify("☀️ Ish rejimi allaqachon yoqilgan.")
+
+    async def tick(self):
+        """Every minute: notices when the schedule or a busy period starts/ends."""
+        cur = self.effective()
+        prev, self.last_kind = self.last_kind, cur.kind
+        if cur.kind == prev:
+            return
+        self.session += 1
+        self.replied_session = {}
+        if cur.kind == "work":
+            await self.on_work_start()
+        elif prev == "work" and cur.reason == "hours":
+            await self.notify("🌙 Ish vaqti tugadi — tungi rejim yoqildi. Yozganlarga «hozir ish vaqtida emas» deyman, xabarlar ovozsiz keladi.")
+        await self.save()
+
+    async def on_work_start(self):
+        log, self.night_log = self.night_log, {}
+        now = self.now()
+        for p in self.pending.values():                      # the reminders about unanswered people start again
+            p["next"] = min(p["next"], now + 60)
+        head = "☀️ Ish rejimi yoqildi."
+        if not log:
+            return await self.notify(head + " Bu vaqtda hech kim yozmadi.")
+        lines = [f"• {v['name']} ({v['count']}): «{v['last'][:120]}»" + (" — javob berdim" if v.get("replied") else "") for v in log.values()]
+        await self.notify(f"{head}\n\nBu vaqtda {len(log)} kishi yozdi:\n" + "\n".join(lines[:15]))
+
+    def log_night(self, chat, name, text):
+        e = self.night_log.setdefault(chat, {"name": name, "count": 0, "last": "", "replied": False})
+        e["count"] += 1
+        e["last"] = text or e["last"]
+
+    async def save(self):
+        fn = getattr(self.tg, "save_state", None)
+        if fn:
+            try:
+                await fn(json.dumps({"override": self.override}))
+            except Exception as e:
+                self.log(f"⚠️ could not save the mode: {type(e).__name__}")
+
+    def restore(self, raw):
+        """After a restart (Render deploys) the mode you set is read back from Saved Messages."""
+        try:
+            ov = json.loads(raw).get("override")
+        except (ValueError, AttributeError):
+            return
+        if isinstance(ov, dict) and ov.get("kind") in ("night", "work", "busy"):
+            self.override = ov
+        self.last_kind = self.effective().kind
+
     async def check_reminders(self):
         """Called every minute. Nothing from you after 30 minutes -> asks "will you answer?" (at most REMIND_TIMES times)."""
+        if self.effective().kind != "work":
+            return                                           # night / busy: no reminders (they start again when work starts)
         now = self.now()
         for chat, p in list(self.pending.items()):
             if now < p["next"]:
@@ -414,7 +585,8 @@ class Responder:
         system = (
             f"You are {o}'s AI assistant. {o} (the OWNER) is texting you privately. Decide what to do. "
             f"Answer with ONE JSON object and nothing else: "
-            f'{{"action": "send" | "dismiss" | "dismiss_and_send" | "delete_last" | "ask" | "none", "target": "...", "message": "...", "reply": "..."}}\n'
+            f'{{"action": "send" | "dismiss" | "dismiss_and_send" | "delete_last" | "set_mode" | "ask" | "none", "target": "...", "message": "...", "reply": "...", '
+            f'"mode": "night" | "work" | "busy", "minutes": 0, "until": "HH:MM", "note": "..."}}\n'
             f"- \"target\": WHO the instruction is about. Leave it \"\" if it is about the person of the current conversation "
             f"({cur_name or 'nobody yet'}). If {o} names ANOTHER person (a name like \"Muhammad Akam\", or a number = a chat id like 6046141246), "
             f"or CORRECTS you (\"not to X, to Y\"), put exactly that name or number in \"target\". Never guess a person {o} did not name.\n"
@@ -424,6 +596,9 @@ class Responder:
             f"If {o} asked for a nice / polite / gentle style, be warm and respectful. A message to an older relative uses \"siz\".\n"
             f"- dismiss: {o} does not want to answer that person; stop reminding. Send nothing. dismiss_and_send: both.\n"
             f"- delete_last: {o} asks to delete / withdraw / take back what you sent that person (\"o'chir\", \"noto'g'ri yuboribsan\").\n"
+            f"- set_mode: {o} tells you his availability. \"uxladim / good night\" -> mode night. \"ish vaqtim boshlandi / uyg'ondim\" -> mode work. "
+            f"\"darsdaman 2 soat\", \"yig'ilishdaman soat 17:00 gacha\" -> mode busy with \"minutes\" (a number) or \"until\" (HH:MM, 24h) and a short \"note\" "
+            f"(what he is doing, in Uzbek). Current local time: {self.local().strftime('%A %H:%M')}.\n"
             f"- ask: the instruction is unclear, a detail or the person is missing; put ONE short question in \"reply\".\n"
             f"- none: not an instruction (thanks, a test).\n"
             f"\"reply\" = a very short confirmation or answer to {o}, in Uzbek (Latin). Use the whole conversation: later owner "
@@ -442,6 +617,8 @@ class Responder:
         if not plan:
             return await self.notify("Tushunmadim 🤔 Qaytadan, boshqacha yozib ko'ring.")
         action, message, reply, target = plan["action"], plan["message"], plan["reply"], plan["target"]
+        if action == "set_mode":
+            return await self.apply_mode(plan["mode"], plan["minutes"], plan["until"], plan["note"])
         if action in ("ask", "none"):
             out = reply or "Tushunmadim 🤔"
             self.owner_hist.append(f"Assistant: {out[:200]}")
@@ -550,6 +727,8 @@ class Responder:
             f"personally (decisions, money, promises, meetings, private matters), say honestly that {o} will answer as "
             f"soon as they are free. Never invent facts. Never promise or agree to anything for {o}. Never share private "
             f"information. If asked whether you are a bot or AI, say yes: you are {o}'s AI assistant. {self.s.persona}\n"
+            f"{o} has not answered for about {int(self.s.grace // 60)} minutes, so he really is busy right now: say that briefly "
+            f"(\"{o} is busy now\") and that he will answer when he is free.\n"
             f"If the message needs {o} personally (a question you cannot answer from the facts, a request, a decision, "
             f"something important or urgent), write the exact token {OWNER_MARK} at the very end of your reply. Friendly small talk "
             f"and questions you can answer from the facts need no token.\n"
@@ -585,13 +764,22 @@ def parse_plan(raw):
     except ValueError:
         return None
     action = str(d.get("action", "")).strip().lower()
-    if action not in ("send", "dismiss", "dismiss_and_send", "delete_last", "ask", "none"):
+    if action not in ("send", "dismiss", "dismiss_and_send", "delete_last", "set_mode", "ask", "none"):
         return None
+    mode = str(d.get("mode") or "").strip().lower()
+    if action == "set_mode" and mode not in ("night", "work", "busy"):
+        return None
+    try:
+        minutes = float(d.get("minutes") or 0)
+    except (TypeError, ValueError):
+        minutes = 0
     message = clean_reply(str(d.get("message") or "")) if action in ("send", "dismiss_and_send") else ""
     if action in ("send", "dismiss_and_send") and not message:
         action = "dismiss" if action == "dismiss_and_send" else "none"
     return {"action": action, "message": message, "reply": " ".join(str(d.get("reply") or "").split())[:400],
-            "target": " ".join(str(d.get("target") or "").split())[:80]}
+            "target": " ".join(str(d.get("target") or "").split())[:80],
+            "mode": mode, "minutes": minutes if 0 < minutes <= 24 * 60 else 0,
+            "until": str(d.get("until") or "").strip()[:5], "note": " ".join(str(d.get("note") or "").split())[:60]}
 
 
 def make_claude(api_key, model):
@@ -614,17 +802,20 @@ def make_notify(client, env, owner_id=None):
     to have pressed Start in that bot once. If the bot can't deliver, the note goes to Saved Messages instead."""
     token, chat = env.get("NOTIFY_BOT_TOKEN"), env.get("NOTIFY_CHAT_ID") or owner_id
 
-    async def notify(text):
+    async def notify(text, silent=False):
         if token and chat:                                    # a bot message gives a real phone notification
             def post():
-                data = urllib.parse.urlencode({"chat_id": chat, "text": text[:3900]}).encode()
+                fields = {"chat_id": chat, "text": text[:3900]}
+                if silent:
+                    fields["disable_notification"] = "true"   # arrives without a sound (night)
+                data = urllib.parse.urlencode(fields).encode()
                 urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", data, timeout=15).read()
             try:
                 return await asyncio.to_thread(post)
             except Exception as e:
                 print(f"⚠️ bot notification failed ({type(e).__name__}) — is Start pressed in that bot? Using Saved Messages", flush=True)
         try:
-            await client.send_message("me", text[:3900])      # Saved Messages (no push notification)
+            await client.send_message("me", text[:3900], silent=silent)   # Saved Messages (no push notification)
         except Exception as e:
             print(f"⚠️ notify failed: {e}", flush=True)
     return notify
@@ -643,6 +834,17 @@ class TelethonTG:
 
     async def send(self, chat, text):
         return (await self.c.send_message(chat, text)).id
+
+    async def save_state(self, text):
+        await self.c.send_message("me", "#jarvis_state " + text, silent=True)
+        old = [m.id async for m in self.c.iter_messages("me", search="#jarvis_state", limit=10)][1:]
+        if old:
+            await self.c.delete_messages("me", old, revoke=True)
+
+    async def load_state(self):
+        async for m in self.c.iter_messages("me", search="#jarvis_state", limit=1):
+            return (m.message or "").replace("#jarvis_state", "", 1).strip()
+        return None
 
     async def delete(self, chat, ids):
         await self.c.delete_messages(chat, ids, revoke=True)
@@ -720,6 +922,13 @@ async def amain(cmd):
     responder = Responder(settings, TelethonTG(client), make_notify(client, env, me.id),
                           make_claude(env.get("ANTHROPIC_API_KEY"), settings.model))
 
+    try:
+        saved = await responder.tg.load_state()
+        if saved:
+            responder.restore(saved)
+    except Exception as e:
+        print(f"⚠️ could not read the saved mode: {type(e).__name__}", flush=True)
+
     @client.on(events.NewMessage(incoming=True))
     async def on_new(event):
         if not event.is_private:
@@ -743,6 +952,10 @@ async def amain(cmd):
         if DISMISS.fullmatch(norm(text)):
             n = responder.dismiss_all()
             await responder.notify(f"✅ Bo'ldi, {n} ta eslatma o'chirildi." if n else "✅ Eslatish uchun hech narsa yo'q edi.")
+        elif len(text) < 60 and MODE_NIGHT.match(norm(text)):
+            await responder.apply_mode("night")
+        elif len(text) < 60 and MODE_WORK.match(norm(text)):
+            await responder.apply_mode("work")
         elif text.strip():                                    # plain words: Claude works out what you want
             reply_text = ""
             if event.is_reply:
@@ -754,12 +967,14 @@ async def amain(cmd):
         while True:
             await asyncio.sleep(60)
             try:
+                await responder.tick()
                 await responder.check_reminders()
             except Exception as e:
                 print(f"⚠️ reminders: {type(e).__name__}: {str(e)[:100]}", flush=True)
     asyncio.create_task(reminder_loop())
 
     print(f"🤖 Jarvis Lite is running. Contacts: {len(get_contacts(settings))}  "
+          f"Work hours: {responder.sched.describe() if responder.sched else 'off'}  Now: {responder.effective().kind}  "
           f"Claude: {'on' if env.get('ANTHROPIC_API_KEY') else 'OFF (fixed sentences only)'}", flush=True)
     await client.run_until_disconnected()
 

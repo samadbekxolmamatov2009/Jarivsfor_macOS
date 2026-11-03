@@ -48,11 +48,26 @@ Oxirida **bitta uzun qator** chiqadi — bu `TG_SESSION`. Uni nusxalang (Cmd+C).
 Pullik narx yoqmasa, **Web Service** + **Free** tarifini sinab ko'rsa bo'ladi: Dastur `PORT` da kichik "ok" javob beradi. Lekin bepul xizmat bir muddat so'rov kelmasa uxlab qoladi, shuning uchun uni tashqi "uptime" xizmati (masalan uptimerobot.com, har 5 daqiqada sizning `https://jarvis-lite.onrender.com` manzilingizga murojaat qiladi) uyg'oq tutishi kerak.
 Bu ishonchsizroq: uxlab turgan paytda kelgan xabar javobsiz qolishi mumkin. Menga **pullik Worker** ishonchliroq tuyuladi.
 
+## Ish vaqti va rejimlar
+**15 daqiqa qoidasi.** Ish vaqtida xabar kelsa, Jarvis 15 daqiqa kutadi. Shu orada o'zingiz javob yozsangiz, jim turadi. Yozmasangiz — «Zufarbek hozir band» deb javob beradi (demak rostdan band ekansiz).
+
+**Botga yozing:**
+| Siz yozasiz | Nima bo'ladi |
+|---|---|
+| **«uxladim»** (yoki `good night`, «yotdim») | 🌙 Tungi rejim. Yozganlarga darrov: «Zufarbek bugungi ish vaqti tugagani uchun javob bera olmaydi, ertaga o'zi javob beradi». Sizga xabarlar **ovozsiz** keladi. Dadajonim/Ayajonim'ga nazokatli bitta xabar ketadi («…hozir uxlayapti, ertalab o'zi yozadi»). |
+| **«ish vaqtim boshlandi»** (yoki «uyg'ondim», `good morning`) | ☀️ Ish rejimi. Bot tunda kimlar yozganini **ro'yxat qilib** beradi va javobsiz qolganlarni eslatishni qayta boshlaydi. |
+| **«darsdaman 2 soat»**, «yig'ilishdaman soat 17:00 gacha» | ⏳ Band rejim: yozganlarga «Zufarbek hozir band (dars o'tmoqda). Soat 17:00 dan keyin o'zi javob beradi». Vaqt o'tgach o'zi odatdagi rejimga qaytadi va xulosa beradi. |
+
+Rejim Render qayta joylansa ham yo'qolmaydi (Telegram'dagi «Saved Messages»da `#jarvis_state` xabari sifatida saqlanadi, uni o'chirmang).
+
+**Avtomatik ish vaqti** (O'zbekiston vaqti): dushanba/chorshanba/juma **16:00–18:00**, seshanba/payshanba/shanba **17:00–19:30**; yakshanba — ish yo'q. Bu vaqtdan tashqarida Jarvis avtomatik tungi rejimda: «hozir ish vaqtida emas, bugun soat 16:00 dan keyin o'zi javob beradi». «Ish vaqtim boshlandi» deb qo'lda ham yoqsangiz bo'ladi (keyingi jadval o'zgarishigacha ishlaydi).
+Sozlamalar (Render → Environment): `WORK_HOURS` (masalan `mon,tue,wed,thu,fri 09:00-18:00` yoki `off` — jadvalsiz, faqat o'z buyruqlaringiz bilan), `TZ_OFFSET` (tayyor `5`), `GRACE_SECONDS` (tayyor `900` = 15 daqiqa).
+
 ## Kimga qanday javob beriladi
 | Kim yozsa | Jarvis nima qiladi |
 |---|---|
 | **Dadajonim, Ayajonim** | Umuman yozmaydi. Botdan sizga darrov xabar beradi (ovozli xabar bo'lsa ham). Javob bermasangiz 30 daqiqadan keyin eslatadi. |
-| **Tanishlar** (ro'yxatdagilar va Telegram kontaktlaringizda saqlanganlar) | Claude mazmunga qarab javob beradi (4 daqiqa kutgach), kerak bo'lsa sizga xabar beradi. |
+| **Tanishlar** (ro'yxatdagilar va Telegram kontaktlaringizda saqlanganlar) | Claude mazmunga qarab javob beradi (15 daqiqa kutgach), kerak bo'lsa sizga xabar beradi. |
 | **Notanishlar** (har qanday boshqa profil) | Faqat tayyor «band, o'zi javob beradi» jumlasi, AI yo'q, shaxsiy ma'lumot yo'q, sizga xabar yo'q. Bitta odamga 6 soatda 1 marta, jami kuniga 15 tagacha. Pul/karta/parol haqida yozsa — umuman javob yo'q. |
 | **Guruh, kanal, bot, Telegram'ning o'zi (777000), o'chirilgan/belgilangan profillar** | Hech qachon javob berilmaydi. |
 
@@ -72,7 +87,7 @@ Bot yuborgan xabarga **javob (reply)** qilib, oddiy so'z bilan yozing, masalan:
 Bot odamga faqat o'zingiz aytgan narsani yozadi: va'da bermaydi, sana/pul qo'shmaydi.
 
 ## Sinash
-Brother'dan savol yozishini so'rang: taxminan 4 daqiqadan keyin javob kelishi, oxirida "🤖 Jarvis (avto-javob)" belgisi bo'lishi kerak. **Mac'dagi Jarvis o'chiq bo'lsin** (yoki `AUTOREPLY_ENABLED = False`), aks holda ikki marta javob oladi.
+Brother'dan savol yozishini so'rang: taxminan 15 daqiqadan keyin javob kelishi, oxirida "🤖 Jarvis (avto-javob)" belgisi bo'lishi kerak. **Mac'dagi Jarvis o'chiq bo'lsin** (yoki `AUTOREPLY_ENABLED = False`), aks holda ikki marta javob oladi.
 
 ## Keyin
 - **Ro'yxat/ma'lumotni o'zgartirish:** Render → Environment → `CONTACTS` / `INFO` ni o'zgartiring; xizmat o'zi qayta ishga tushadi.
