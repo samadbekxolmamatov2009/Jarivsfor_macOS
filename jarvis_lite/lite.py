@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 import datetime
 
 import modes
+import store
 from langdetect import detect as detect_lang
 
 # ------------------------------------------------------------------ texts
@@ -56,6 +57,11 @@ AMOUNT_INTENT = re.compile(
 DISMISS = re.compile(r"\s*/?(?:yo'?q|yoq|нет|no|skip|stop|bekor(?:\s+qil)?)\s*[.!]*\s*", re.I)   # the WHOLE message ("yo'q")
 MODE_NIGHT = re.compile(r"\s*(?:uxladim|uxlayman|uxlashga ketdim|yotdim|yotaman|tungi rejim|good ?night|спокойной ночи)\b", re.I)
 MODE_WORK = re.compile(r"\s*(?:ish vaqtim boshlandi|ish boshlandi|ish boshladim|ish rejimi|uyg'?ondim|uygondim|good ?morning|доброе утро)\b", re.I)
+SCHED_CMD = re.compile(r"\s*/yoz\b", re.I)                               # /yoz Muhammad Akam | ertaga 10:00 | matn
+LIST_SCHED = re.compile(r"\s*/?(?:rejalar|rejalashtirilgan(?:lar| xabarlar)?)\s*", re.I)
+TIME_CMD = re.compile(r"\s*/?(?:vaqt|soat|time)\s*", re.I)             # «/vaqt» -> what time the bot thinks it is
+CANCEL_SCHED = re.compile(r"\s*/?(?:bekor|cancel)\s*#?(\d+)\s*", re.I)
+STALE_AFTER = 6 * 3600                  # a scheduled message more than 6 hours late (server was down) is NOT sent any more, you are told
 TAG = re.compile(r"🔖\s*(-?\d+)")                # every note to your phone ends with 🔖 <chat id>: tells which person it is about
 OWNER_MARK = "[[OWNER]]"            # Claude adds it when only the owner can answer; it never reaches the other person
 LEAK = re.compile(r"(?:as an ai language model|i am an ai developed|openai|anthropic|\bllama\b|system prompt)", re.I)
@@ -189,8 +195,9 @@ class Responder:
     """All the decisions. `tg` needs: async recent(chat, n) -> [Msg] (oldest first), async send(chat, text) -> id.
     `notify(text)` is async. `claude(system, user)` is async and returns text or None."""
 
-    def __init__(self, settings, tg, notify, claude=None, sleep=asyncio.sleep, log=print):
+    def __init__(self, settings, tg, notify, claude=None, sleep=asyncio.sleep, log=print, db=None):
         self.s, self.tg, self._raw_notify, self.claude, self.sleep, self.log = settings, tg, notify, claude, sleep, log
+        self.db, self._saved_blob = db, None                  # database (Turso / SQLite): scheduled messages + state that survives restarts
         self.sched = modes.parse_schedule(settings.work_hours, settings.tz_hours)
         self.tz = datetime.timezone(datetime.timedelta(hours=settings.tz_hours))
         self.override = None                    # your manual mode (night / work / busy) until its end
@@ -478,6 +485,11 @@ class Responder:
 
     async def tick(self):
         """Every minute: notices when the schedule or a busy period starts/ends."""
+        await self.run_scheduled()
+        await self._tick_modes()
+        await self.save()
+
+    async def _tick_modes(self):
         cur = self.effective()
         prev, self.last_kind = self.last_kind, cur.kind
         if cur.kind == prev:
@@ -488,7 +500,6 @@ class Responder:
             await self.on_work_start()
         elif prev == "work" and cur.reason == "hours":
             await self.notify("🌙 Ish vaqti tugadi — tungi rejim yoqildi. Yozganlarga «hozir ish vaqtida emas» deyman, xabarlar ovozsiz keladi.")
-        await self.save()
 
     async def on_work_start(self):
         log, self.night_log = self.night_log, {}
@@ -506,7 +517,25 @@ class Responder:
         e["count"] += 1
         e["last"] = text or e["last"]
 
+    def state_dict(self):
+        return {"override": self.override, "last_chat": self.last_chat,
+                "pending": {str(k): v for k, v in self.pending.items()},
+                "night_log": {str(k): v for k, v in self.night_log.items()},
+                "names": {str(k): v for k, v in self.names.items()}}
+
     async def save(self):
+        """The mode, who is waiting for your answer, the night list: kept in the database (or, with no database, the mode
+        alone in Saved Messages) so a restart / redeploy loses nothing."""
+        if self.db:
+            blob = json.dumps(self.state_dict(), ensure_ascii=False, sort_keys=True)
+            if blob == self._saved_blob:
+                return
+            try:
+                await self.db.kv_set("state", blob)
+                self._saved_blob = blob
+            except Exception as e:
+                self.log(f"⚠️ could not save the state: {type(e).__name__}: {str(e)[:100]}")
+            return
         fn = getattr(self.tg, "save_state", None)
         if fn:
             try:
@@ -514,15 +543,115 @@ class Responder:
             except Exception as e:
                 self.log(f"⚠️ could not save the mode: {type(e).__name__}")
 
-    def restore(self, raw):
-        """After a restart (Render deploys) the mode you set is read back from Saved Messages."""
+    async def load(self):
+        raw = None
         try:
-            ov = json.loads(raw).get("override")
+            if self.db:
+                raw = await self.db.kv_get("state")
+            elif getattr(self.tg, "load_state", None):
+                raw = await self.tg.load_state()
+        except Exception as e:
+            self.log(f"⚠️ could not read the saved state: {type(e).__name__}: {str(e)[:100]}")
+        if raw:
+            self.restore(raw)
+
+    def restore(self, raw):
+        """After a restart (Render deploys) everything you set is read back."""
+        try:
+            d = json.loads(raw)
+            ov = d.get("override")
         except (ValueError, AttributeError):
             return
         if isinstance(ov, dict) and ov.get("kind") in ("night", "work", "busy"):
             self.override = ov
+        conv = lambda m: {int(k): v for k, v in (m or {}).items() if str(k).lstrip("-").isdigit() and isinstance(v, dict)}  # noqa: E731
+        self.pending.update(conv(d.get("pending")))
+        self.night_log.update(conv(d.get("night_log")))
+        self.names.update({int(k): v for k, v in (d.get("names") or {}).items() if str(k).lstrip("-").isdigit()})
+        if isinstance(d.get("last_chat"), int):
+            self.last_chat = d["last_chat"]
         self.last_kind = self.effective().kind
+        self._saved_blob = None
+
+    # ---- scheduled messages: you write the text, name the person and the time; it goes out at that time
+    def fmt(self, ts):
+        return datetime.datetime.fromtimestamp(ts, self.tz).strftime("%d.%m.%Y %H:%M")
+
+    async def schedule_common(self, chat, name, text, when):
+        if not self.db:
+            return await self.notify("Baza ulanmagan, rejalashtira olmayman.")
+        if not text.strip():
+            return await self.notify("Xabar matni bo'sh — nima yuborishim kerak?")
+        if when is None:
+            return await self.notify("Vaqtni tushunmadim. Masalan: ertaga 10:00, bugun 18:30, 05.11 10:00, 2 soatdan keyin.")
+        ts = int(when.timestamp())
+        if ts < self.now() + 20:
+            return await self.notify(f"Bu vaqt ({self.fmt(ts)}) o'tib ketgan yoki juda yaqin — yangi vaqt ayting.")
+        rows = await self.db.query("INSERT INTO scheduled (chat, name, text, send_at, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
+                                   [chat, name, text, ts, int(self.now())])
+        sid = rows[0]["id"]
+        await self.notify(f"⏰ #{sid} rejalashtirildi: {name} ga {self.fmt(ts)} da yuboraman:\n«{text[:500]}»\n\n"
+                          f"Bekor qilish: «/bekor {sid}»  ·  Ro'yxat: «/rejalar»")
+
+    async def schedule_from_command(self, text):
+        """/yoz Kimga | vaqt | xabar matni   (no AI: your text goes out exactly as you wrote it)"""
+        parts = [p.strip() for p in re.sub(r"^\s*/yoz\s*", "", text, flags=re.I).split("|", 2)]
+        if len(parts) < 3 or not all(parts):
+            return await self.notify("Format:  /yoz Kimga | vaqt | xabar matni\nMasalan:  /yoz Muhammad Akam | ertaga 10:00 | Assalomu alaykum, ...\n"
+                                     "Vaqt: ertaga 10:00 · bugun 18:30 · 05.11 10:00 · 2 soatdan keyin")
+        who, when_s, msg = parts
+        res = await self.resolve_target(who, None, "")
+        if res:
+            await self.schedule_common(res[0], res[1], msg, modes.parse_when(when_s, self.local()))
+
+    def utc_label(self):
+        h = self.s.tz_hours
+        return f"UTC{'+' if h >= 0 else '-'}{abs(h):g}"
+
+    async def say_time(self):
+        await self.notify(f"🕒 Hozir {self.local():%d.%m.%Y %H:%M} ({self.utc_label()}, O'zbekiston/Toshkent vaqti). "
+                          f"Rejalashtirilgan xabarlar va ish vaqti shu vaqt bo'yicha ishlaydi.")
+
+    async def list_scheduled(self):
+        if not self.db:
+            return await self.notify("Baza ulanmagan.")
+        rows = await self.db.query("SELECT id, name, text, send_at FROM scheduled WHERE status = 'pending' ORDER BY send_at LIMIT 20")
+        if not rows:
+            return await self.notify("📋 Rejalashtirilgan xabar yo'q.")
+        await self.notify("📋 Rejalashtirilgan xabarlar:\n" + "\n".join(
+            f"#{r['id']} — {self.fmt(r['send_at'])} → {r['name']}: «{r['text'][:60]}»" for r in rows) + "\n\nBekor qilish: «/bekor 3»")
+
+    async def cancel_scheduled(self, sid):
+        if not self.db:
+            return await self.notify("Baza ulanmagan.")
+        n = await self.db.execute("UPDATE scheduled SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [int(sid)])
+        await self.notify(f"✅ #{sid} bekor qilindi." if n else f"#{sid} raqamli kutayotgan xabar topilmadi.")
+
+    async def run_scheduled(self):
+        """Every minute: sends what is due. Your own text, from your account, nothing added."""
+        if not self.db:
+            return
+        now = int(self.now())
+        try:
+            due = await self.db.query("SELECT id, chat, name, text, send_at FROM scheduled WHERE status = 'pending' "
+                                      "AND send_at <= ? ORDER BY send_at LIMIT 20", [now])
+        except Exception as e:
+            return self.log(f"⚠️ scheduled messages: {type(e).__name__}: {str(e)[:100]}")
+        for r in due:
+            if not await self.db.execute("UPDATE scheduled SET status = 'sending' WHERE id = ? AND status = 'pending'", [r["id"]]):
+                continue                                             # somebody else took it
+            if now - r["send_at"] > STALE_AFTER:
+                await self.db.execute("UPDATE scheduled SET status = 'missed' WHERE id = ?", [r["id"]])
+                await self.notify(f"⚠️ #{r['id']} vaqtida yuborilmadi (server o'chiq edi, {self.fmt(r['send_at'])}) — {r['name']}: "
+                                  f"«{r['text'][:200]}». Eskirgani uchun yubormadim; kerak bo'lsa o'zingiz yuboring.")
+                continue
+            try:
+                await self.tg.send(r["chat"], r["text"])
+                await self.db.execute("UPDATE scheduled SET status = 'sent' WHERE id = ?", [r["id"]])
+                await self.notify(f"✅ #{r['id']} yuborildi: {r['name']} ga «{r['text'][:200]}»")
+            except Exception as e:
+                await self.db.execute("UPDATE scheduled SET status = 'failed', note = ? WHERE id = ?", [type(e).__name__, r["id"]])
+                await self.notify(f"⚠️ #{r['id']} yuborilmadi ({r['name']}): {type(e).__name__}. Qaytadan rejalashtiring.")
 
     async def check_reminders(self):
         """Called every minute. Nothing from you after 30 minutes -> asks "will you answer?" (at most REMIND_TIMES times)."""
@@ -585,8 +714,8 @@ class Responder:
         system = (
             f"You are {o}'s AI assistant. {o} (the OWNER) is texting you privately. Decide what to do. "
             f"Answer with ONE JSON object and nothing else: "
-            f'{{"action": "send" | "dismiss" | "dismiss_and_send" | "delete_last" | "set_mode" | "ask" | "none", "target": "...", "message": "...", "reply": "...", '
-            f'"mode": "night" | "work" | "busy", "minutes": 0, "until": "HH:MM", "note": "..."}}\n'
+            f'{{"action": "send" | "dismiss" | "dismiss_and_send" | "delete_last" | "set_mode" | "schedule" | "list_scheduled" | "cancel_scheduled" | "ask" | "none", "target": "...", "message": "...", "reply": "...", '
+            f'"mode": "night" | "work" | "busy", "minutes": 0, "until": "HH:MM", "at": "YYYY-MM-DD HH:MM", "id": 0, "note": "..."}}\n'
             f"- \"target\": WHO the instruction is about. Leave it \"\" if it is about the person of the current conversation "
             f"({cur_name or 'nobody yet'}). If {o} names ANOTHER person (a name like \"Muhammad Akam\", or a number = a chat id like 6046141246), "
             f"or CORRECTS you (\"not to X, to Y\"), put exactly that name or number in \"target\". Never guess a person {o} did not name.\n"
@@ -598,7 +727,12 @@ class Responder:
             f"- delete_last: {o} asks to delete / withdraw / take back what you sent that person (\"o'chir\", \"noto'g'ri yuboribsan\").\n"
             f"- set_mode: {o} tells you his availability. \"uxladim / good night\" -> mode night. \"ish vaqtim boshlandi / uyg'ondim\" -> mode work. "
             f"\"darsdaman 2 soat\", \"yig'ilishdaman soat 17:00 gacha\" -> mode busy with \"minutes\" (a number) or \"until\" (HH:MM, 24h) and a short \"note\" "
-            f"(what he is doing, in Uzbek). Current local time: {self.local().strftime('%A %H:%M')}.\n"
+            f"(what he is doing, in Uzbek). Current local time: {self.local().strftime('%A %Y-%m-%d %H:%M')}.\n"
+            f"- schedule: {o} wants a message sent to someone LATER. \"message\" = EXACTLY the text {o} wrote for that person (his own words; "
+            f"add nothing, no greeting, no signature, do not translate or polish: it goes out as his own message). \"target\" = who. "
+            f"\"at\" = the local date and time 'YYYY-MM-DD HH:MM' worked out from the current local time, or \"minutes\" for 'in N minutes'. "
+            f"If the text or the time is missing, use ask.\n"
+            f"- list_scheduled: he asks which messages are scheduled (\"rejalar\"). cancel_scheduled: \"id\" = the number he gives.\n"
             f"- ask: the instruction is unclear, a detail or the person is missing; put ONE short question in \"reply\".\n"
             f"- none: not an instruction (thanks, a test).\n"
             f"\"reply\" = a very short confirmation or answer to {o}, in Uzbek (Latin). Use the whole conversation: later owner "
@@ -619,26 +753,24 @@ class Responder:
         action, message, reply, target = plan["action"], plan["message"], plan["reply"], plan["target"]
         if action == "set_mode":
             return await self.apply_mode(plan["mode"], plan["minutes"], plan["until"], plan["note"])
+        if action == "list_scheduled":
+            return await self.list_scheduled()
+        if action == "cancel_scheduled":
+            return await self.cancel_scheduled(plan["id"]) if plan["id"] else await self.notify("Qaysi raqamli xabarni bekor qilay? Masalan: /bekor 3")
         if action in ("ask", "none"):
             out = reply or "Tushunmadim 🤔"
             self.owner_hist.append(f"Assistant: {out[:200]}")
             return await self.notify(out)
 
         # --- WHO? the person you named wins over "the latest note"
-        chat, name = cur, cur_name
-        if target:
-            found = await self.tg.find(target)
-            if not found:
-                return await self.notify(f"«{target}» degan odamni topa olmadim. Aniq ismini (Telegram'dagidek) yoki chat raqamini yozing.")
-            if len(found) > 1:
-                names = "\n".join(f"• {n}" for _, n in found[:6])
-                out = f"«{target}» ga bir nechta odam mos keldi — qaysi biri?\n{names}\nAniq ismini yozing."
-                self.owner_hist.append(f"Assistant: {out[:200]}")
-                return await self.notify(out)
-            chat, name = found[0]
-            self.names[chat] = name
-        if chat is None:
-            return await self.notify("Qaysi odam haqida yozyapsiz? Ismini yozing yoki menga yuborgan xabarimga «javob» (reply) qilib yozing.")
+        res = await self.resolve_target(target, cur, cur_name)
+        if not res:
+            return
+        chat, name = res
+        if action == "schedule":
+            when = modes.parse_when(plan["at"], self.local()) if plan["at"] else (
+                self.local() + datetime.timedelta(minutes=plan["minutes"]) if plan["minutes"] else None)
+            return await self.schedule_common(chat, name, message, when)
 
         if action == "delete_last":
             return await self.delete_last(chat, name)
@@ -662,6 +794,27 @@ class Responder:
             out = f"✅ Bo'ldi, {name} haqida boshqa eslatmayman."
         self.owner_hist.append(f"Assistant: {out[:200]}")
         await self.notify(out)
+
+    async def resolve_target(self, target, cur, cur_name):
+        """-> (chat_id, name), or None after telling you why (not found / which one / who?)."""
+        chat, name = cur, cur_name
+        if target:
+            found = await self.tg.find(target)
+            if not found:
+                await self.notify(f"«{target}» degan odamni topa olmadim. Aniq ismini (Telegram'dagidek) yoki chat raqamini yozing.")
+                return None
+            if len(found) > 1:
+                names = "\n".join(f"• {n}" for _, n in found[:6])
+                out = f"«{target}» ga bir nechta odam mos keldi — qaysi biri?\n{names}\nAniq ismini yozing."
+                self.owner_hist.append(f"Assistant: {out[:200]}")
+                await self.notify(out)
+                return None
+            chat, name = found[0]
+            self.names[chat] = name
+        if chat is None:
+            await self.notify("Qaysi odam haqida yozyapsiz? Ismini yozing yoki menga yuborgan xabarimga «javob» (reply) qilib yozing.")
+            return None
+        return chat, name
 
     async def delete_last(self, chat, name):
         """Takes back what the assistant sent to that person (only messages carrying its own mark — never yours)."""
@@ -764,7 +917,7 @@ def parse_plan(raw):
     except ValueError:
         return None
     action = str(d.get("action", "")).strip().lower()
-    if action not in ("send", "dismiss", "dismiss_and_send", "delete_last", "set_mode", "ask", "none"):
+    if action not in ("send", "dismiss", "dismiss_and_send", "delete_last", "set_mode", "schedule", "list_scheduled", "cancel_scheduled", "ask", "none"):
         return None
     mode = str(d.get("mode") or "").strip().lower()
     if action == "set_mode" and mode not in ("night", "work", "busy"):
@@ -774,12 +927,21 @@ def parse_plan(raw):
     except (TypeError, ValueError):
         minutes = 0
     message = clean_reply(str(d.get("message") or "")) if action in ("send", "dismiss_and_send") else ""
+    if action == "schedule":
+        message = str(d.get("message") or "").strip()[:2000]          # your text is kept exactly (line breaks too)
+        if not message:
+            action = "none"
     if action in ("send", "dismiss_and_send") and not message:
         action = "dismiss" if action == "dismiss_and_send" else "none"
+    try:
+        sid = int(d.get("id") or 0)
+    except (TypeError, ValueError):
+        sid = 0
     return {"action": action, "message": message, "reply": " ".join(str(d.get("reply") or "").split())[:400],
             "target": " ".join(str(d.get("target") or "").split())[:80],
             "mode": mode, "minutes": minutes if 0 < minutes <= 24 * 60 else 0,
-            "until": str(d.get("until") or "").strip()[:5], "note": " ".join(str(d.get("note") or "").split())[:60]}
+            "until": str(d.get("until") or "").strip()[:5], "note": " ".join(str(d.get("note") or "").split())[:60],
+            "at": str(d.get("at") or "").strip()[:20], "id": sid}
 
 
 def make_claude(api_key, model):
@@ -899,11 +1061,17 @@ async def health_server(port):
 
 
 async def amain(cmd):
-    from telethon import TelegramClient, events
-    from telethon.sessions import StringSession
     env = os.environ
     data = env.get("DATA_DIR", ".")
     os.makedirs(data, exist_ok=True)
+    if cmd == "dbtest":                                       # python lite.py dbtest  -> is the database connected?
+        db = store.make_db(env, data)
+        await db.init()
+        await db.kv_set("dbtest", "ok")
+        print(f"✅ Database works ({db.kind}): wrote and read back '{await db.kv_get('dbtest')}'")
+        return
+    from telethon import TelegramClient, events
+    from telethon.sessions import StringSession
     # TG_SESSION (a text string made once with make_session.py) works where files vanish, e.g. Render; else a session file
     session = StringSession(clean_session(env["TG_SESSION"])) if env.get("TG_SESSION") else os.path.join(data, "session")
     client = TelegramClient(session, int(env["TG_API_ID"]), env["TG_API_HASH"])
@@ -919,15 +1087,19 @@ async def amain(cmd):
         sys.exit("❌ Not logged in to Telegram yet. Server: python lite.py login   |   Render: set TG_SESSION (make_session.py)")
     settings = Settings.from_env()
     me = await client.get_me()
-    responder = Responder(settings, TelethonTG(client), make_notify(client, env, me.id),
-                          make_claude(env.get("ANTHROPIC_API_KEY"), settings.model))
-
+    db = store.make_db(env, data)
     try:
-        saved = await responder.tg.load_state()
-        if saved:
-            responder.restore(saved)
+        await db.init()
+        warn = "  (a local file: on Render it is lost at every restart — set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN)" \
+            if db.kind != "Turso" and env.get("RENDER") else ""
+        print(f"🗄  Database: {db.kind}{warn}", flush=True)
     except Exception as e:
-        print(f"⚠️ could not read the saved mode: {type(e).__name__}", flush=True)
+        print(f"⚠️ Database unavailable ({type(e).__name__}: {str(e)[:120]}) — scheduled messages and saved state are OFF", flush=True)
+        db = None
+    responder = Responder(settings, TelethonTG(client), make_notify(client, env, me.id),
+                          make_claude(env.get("ANTHROPIC_API_KEY"), settings.model), db=db)
+
+    await responder.load()
 
     @client.on(events.NewMessage(incoming=True))
     async def on_new(event):
@@ -952,6 +1124,14 @@ async def amain(cmd):
         if DISMISS.fullmatch(norm(text)):
             n = responder.dismiss_all()
             await responder.notify(f"✅ Bo'ldi, {n} ta eslatma o'chirildi." if n else "✅ Eslatish uchun hech narsa yo'q edi.")
+        elif SCHED_CMD.match(text):
+            asyncio.create_task(responder.schedule_from_command(text))
+        elif TIME_CMD.fullmatch(norm(text)):
+            await responder.say_time()
+        elif LIST_SCHED.fullmatch(norm(text)):
+            await responder.list_scheduled()
+        elif CANCEL_SCHED.fullmatch(norm(text)):
+            await responder.cancel_scheduled(int(CANCEL_SCHED.fullmatch(norm(text)).group(1)))
         elif len(text) < 60 and MODE_NIGHT.match(norm(text)):
             await responder.apply_mode("night")
         elif len(text) < 60 and MODE_WORK.match(norm(text)):
@@ -975,6 +1155,7 @@ async def amain(cmd):
 
     print(f"🤖 Jarvis Lite is running. Contacts: {len(get_contacts(settings))}  "
           f"Work hours: {responder.sched.describe() if responder.sched else 'off'}  Now: {responder.effective().kind}  "
+          f"Time: {responder.local():%Y-%m-%d %H:%M} {responder.utc_label()}  "
           f"Claude: {'on' if env.get('ANTHROPIC_API_KEY') else 'OFF (fixed sentences only)'}", flush=True)
     await client.run_until_disconnected()
 

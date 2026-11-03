@@ -48,6 +48,27 @@ Oxirida **bitta uzun qator** chiqadi — bu `TG_SESSION`. Uni nusxalang (Cmd+C).
 Pullik narx yoqmasa, **Web Service** + **Free** tarifini sinab ko'rsa bo'ladi: Dastur `PORT` da kichik "ok" javob beradi. Lekin bepul xizmat bir muddat so'rov kelmasa uxlab qoladi, shuning uchun uni tashqi "uptime" xizmati (masalan uptimerobot.com, har 5 daqiqada sizning `https://jarvis-lite.onrender.com` manzilingizga murojaat qiladi) uyg'oq tutishi kerak.
 Bu ishonchsizroq: uxlab turgan paytda kelgan xabar javobsiz qolishi mumkin. Menga **pullik Worker** ishonchliroq tuyuladi.
 
+## Baza (Turso)
+Rejalashtirilgan xabarlar va holat (rejim, kutayotganlar, tungi ro'yxat) **bazada** saqlanadi, shuning uchun Render qayta joylansa ham yo'qolmaydi. Render → Environment:
+| Key | Value |
+|---|---|
+| `TURSO_DATABASE_URL` | Turso'dagi bazangiz manzili: `libsql://....turso.io` |
+| `TURSO_AUTH_TOKEN` | Turso tokeni (dashboard'da bazani oching → **Generate Token**, yoki terminalda `turso db tokens create BAZA-NOMI`) |
+
+Ishga tushganda Logs'da `🗄 Database: Turso` chiqishi kerak. Xato bo'lsa `⚠️ Database unavailable (...)` yoziladi va rejalashtirish o'chiq turadi. Sinab ko'rish (ixtiyoriy, Mac'da, repoda): `TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... python3 lite.py dbtest`.
+Jadvallarni o'zi yaratadi, qo'lda hech narsa qilish shart emas. Token boshqa joyga (chatga, GitHub'ga) yuborilmasin.
+
+## Oldindan yozilgan (rejalashtirilgan) xabarlar
+Xabarni, kimga ekanini va vaqtini siz aytasiz, Jarvis shu vaqtda **sizning akkauntingizdan, siz yozgandek** yuboradi (🤖 belgisisiz, matn aynan o'zingiznikidek). Botga yozing:
+- **Aniq usul (AI'siz, eng ishonchli):** `/yoz Muhammad Akam | ertaga 10:00 | Assalomu alaykum, aka! ...`
+- **Oddiy so'z bilan:** «Muhammad Akamga ertaga soat 10 da yoz: Aka, serverga to'lov qilib qo'ying» (Claude kim/matn/vaqtni ajratadi, matnni o'zgartirmaydi).
+
+Vaqt shakllari: `ertaga 10:00`, `bugun 18:30`, `18:30`, `05.11 10:00`, `5-noyabr 10:00`, `2026-11-05 09:30`, `2 soatdan keyin`. Vaqt **O'zbekiston (Toshkent, UTC+5)** vaqti bilan; `/vaqt` deb yozsangiz bot hozir qaysi vaqtni bilishini aytadi.
+Bot darrov tasdiqlaydi: «⏰ #3 rejalashtirildi: Muhammad Akam ga 04.11.2026 10:00 da yuboraman: «…»». Vaqti kelganda yuboradi va «✅ #3 yuborildi» deydi.
+- **`/rejalar`** — kutayotganlar ro'yxati; **`/bekor 3`** — bekor qilish.
+- Ism bir nechta odamga mos kelsa, qaysi biri ekanini so'raydi; topa olmasa yubormaydi.
+- Server o'chiq bo'lib, xabar 6 soatdan ko'proq kechiksa — eskirgan xabarni **yubormaydi**, sizga aytadi.
+
 ## Ish vaqti va rejimlar
 **15 daqiqa qoidasi.** Ish vaqtida xabar kelsa, Jarvis 15 daqiqa kutadi. Shu orada o'zingiz javob yozsangiz, jim turadi. Yozmasangiz — «Zufarbek hozir band» deb javob beradi (demak rostdan band ekansiz).
 
