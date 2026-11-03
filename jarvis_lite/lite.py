@@ -88,7 +88,7 @@ class Settings:
     model: str = "claude-haiku-5-5"
     lang_mode: str = "auto"          # auto | en | llm
     grace: float = 900.0             # seconds to wait before answering (15 minutes: you may answer yourself; then you are "really busy")
-    work_hours: str = modes.DEFAULT_WORK_HOURS     # WORK_HOURS="off" = no schedule (only your own commands)
+    busy_hours: str = modes.DEFAULT_BUSY_HOURS     # BUSY_HOURS = the times you are BUSY; "off" = no schedule (only your own commands)
     tz_hours: float = 5.0            # TZ_OFFSET: your time zone, hours from UTC (Uzbekistan = 5)
     contacts_file: str = "contacts.txt"
     info_file: str = "info.txt"
@@ -112,7 +112,7 @@ class Settings:
         return cls(owner=env.get("OWNER_NAME", "Zufarbek"), owner_full=env.get("OWNER_FULL_NAME", "Zufarbek Jumayev"),
                    model=env.get("AUTOREPLY_MODEL", "claude-haiku-5-5"), lang_mode=env.get("AUTOREPLY_LANG", "auto").lower(),
                    grace=float(env.get("GRACE_SECONDS", "900")),
-                   work_hours=env.get("WORK_HOURS", modes.DEFAULT_WORK_HOURS), tz_hours=float(env.get("TZ_OFFSET", "5")), persona=env.get("AUTOREPLY_PERSONA", ""),
+                   busy_hours=env.get("BUSY_HOURS", modes.DEFAULT_BUSY_HOURS), tz_hours=float(env.get("TZ_OFFSET", "5")), persona=env.get("AUTOREPLY_PERSONA", ""),
                    contacts_file=os.path.join(d, "contacts.txt"), info_file=os.path.join(d, "info.txt"),
                    contacts_env=env.get("CONTACTS", ""), info_env=env.get("INFO", ""),
                    pay_contact=env.get("PAY_CONTACT", "Muhammad Akam"), pay_card=env.get("PAY_CARD", "").strip(),
@@ -198,7 +198,7 @@ class Responder:
     def __init__(self, settings, tg, notify, claude=None, sleep=asyncio.sleep, log=print, db=None):
         self.s, self.tg, self._raw_notify, self.claude, self.sleep, self.log = settings, tg, notify, claude, sleep, log
         self.db, self._saved_blob = db, None                  # database (Turso / SQLite): scheduled messages + state that survives restarts
-        self.sched = modes.parse_schedule(settings.work_hours, settings.tz_hours)
+        self.sched = modes.parse_schedule(settings.busy_hours, settings.tz_hours)
         self.tz = datetime.timezone(datetime.timedelta(hours=settings.tz_hours))
         self.override = None                    # your manual mode (night / work / busy) until its end
         self.session = 0                        # changes with every mode change: "told this person already in this period"
@@ -317,7 +317,7 @@ class Responder:
         if mode.kind == "night" and self.replied_session.get(chat) != self.session:
             self.replied_session[chat] = self.session
             self.night_log[chat]["replied"] = True
-            return await self.deliver(chat, name, label, modes.parent_reply(mode, name, self.s.owner),
+            return await self.deliver(chat, name, label, modes.parent_reply(name, self.s.owner),
                                       tell=f"👪 {name} yozdi — nazokatli javob berdim:\n«{label[:300]}»")
         if texts:
             text = "\n".join(texts)
@@ -338,7 +338,7 @@ class Responder:
         if stranger and (not self.stranger_budget(chat, now) or (texts and SENSITIVE.search(label))):
             return
         lang = "en" if self.s.lang_mode == "en" else (detect_lang(label) if texts else "uz")
-        reply = modes.mode_reply(mode, lang, self.s.owner, self.sched, self.local())
+        reply = modes.mode_reply(mode, lang, self.s.owner, self.local())
         self.replied_session[chat] = self.session
         self.night_log[chat]["replied"] = True
         await self.deliver(chat, name, label, reply, stranger=stranger)
@@ -438,13 +438,16 @@ class Responder:
                 self.override = ov = None                    # your manual mode ran out (busy time over / next schedule change)
         if ov:
             return modes.Mode(ov["kind"], "manual", ov.get("note", ""), ov.get("until"))
-        if self.sched and not self.sched.is_open(self.sched.local(now)):
-            return modes.Mode("night", "hours")
+        if self.sched:
+            dt = self.sched.local(now)
+            if self.sched.is_open(dt):                       # inside your busy hours
+                end = self.sched.next_change(dt)
+                return modes.Mode("busy", "hours", "", end.timestamp() if end else None)
         return modes.Mode("work")
 
     def set_mode(self, kind, until=None, note=""):
         boundary = None
-        if kind in ("night", "work") and self.sched:         # "uxladim" / "ish boshlandi" last until the next scheduled change
+        if kind == "work" and self.sched:                    # «ish vaqtim boshlandi» (= I am free) lasts until the schedule changes
             nc = self.sched.next_change(self.sched.local(self.now()))
             boundary = nc.timestamp() if nc else None
         if kind == "work" and not self.sched:
@@ -497,16 +500,17 @@ class Responder:
         self.session += 1
         self.replied_session = {}
         if cur.kind == "work":
-            await self.on_work_start()
-        elif prev == "work" and cur.reason == "hours":
-            await self.notify("🌙 Ish vaqti tugadi — tungi rejim yoqildi. Yozganlarga «hozir ish vaqtida emas» deyman, xabarlar ovozsiz keladi.")
+            await self.on_work_start(prev)
+        elif prev == "work" and cur.kind == "busy" and cur.reason == "hours":
+            till = datetime.datetime.fromtimestamp(cur.until, self.tz).strftime("%H:%M") if cur.until else "?"
+            await self.notify(f"⏳ Band vaqt boshlandi — soat {till} gacha. Yozganlarga «Zufarbek hozir band, {till} dan keyin o'zi javob beradi» deyman.")
 
-    async def on_work_start(self):
+    async def on_work_start(self, prev="night"):
         log, self.night_log = self.night_log, {}
         now = self.now()
         for p in self.pending.values():                      # the reminders about unanswered people start again
             p["next"] = min(p["next"], now + 60)
-        head = "☀️ Ish rejimi yoqildi."
+        head = "☀️ Band vaqt tugadi — odatdagi rejim." if prev == "busy" else "☀️ Ish rejimi yoqildi."
         if not log:
             return await self.notify(head + " Bu vaqtda hech kim yozmadi.")
         lines = [f"• {v['name']} ({v['count']}): «{v['last'][:120]}»" + (" — javob berdim" if v.get("replied") else "") for v in log.values()]
@@ -1154,7 +1158,7 @@ async def amain(cmd):
     asyncio.create_task(reminder_loop())
 
     print(f"🤖 Jarvis Lite is running. Contacts: {len(get_contacts(settings))}  "
-          f"Work hours: {responder.sched.describe() if responder.sched else 'off'}  Now: {responder.effective().kind}  "
+          f"Busy hours: {responder.sched.describe() if responder.sched else 'off'}  Now: {responder.effective().kind}  "
           f"Time: {responder.local():%Y-%m-%d %H:%M} {responder.utc_label()}  "
           f"Claude: {'on' if env.get('ANTHROPIC_API_KEY') else 'OFF (fixed sentences only)'}", flush=True)
     await client.run_until_disconnected()

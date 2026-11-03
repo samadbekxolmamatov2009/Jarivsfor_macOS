@@ -1,7 +1,8 @@
-"""Work hours, night mode and timed 'busy' mode for Jarvis Lite — pure logic, no Telegram here.
+"""Busy hours, night mode and timed 'busy' mode for Jarvis Lite — pure logic, no Telegram here.
 
-WORK_HOURS (env) example:  "mon,wed,fri 16:00-18:00; tue,thu,sat 17:00-19:30"   ("off" = no schedule; days not listed = no work)
-Times are in your time zone (TZ_OFFSET hours from UTC, default 5 = Uzbekistan).
+BUSY_HOURS (env) = the times you are BUSY and cannot answer, e.g. "mon,wed,fri 16:00-18:00; tue,thu,sat 17:00-19:30"
+("off" = no schedule; days not listed = no busy time). Outside these hours you are available (people wait 15 minutes, then
+get "busy"). Times are in your time zone (TZ_OFFSET hours from UTC, default 5 = Uzbekistan).
 """
 import datetime
 import re
@@ -13,7 +14,7 @@ DAY_KEYS = {"mon": 0, "du": 0, "dush": 0, "tue": 1, "se": 1, "sesh": 1, "wed": 2
 DAYS_UZ = ["dushanba", "seshanba", "chorshanba", "payshanba", "juma", "shanba", "yakshanba"]
 DAYS_RU_ON = ["в понедельник", "во вторник", "в среду", "в четверг", "в пятницу", "в субботу", "в воскресенье"]
 DAYS_EN_ON = ["on Monday", "on Tuesday", "on Wednesday", "on Thursday", "on Friday", "on Saturday", "on Sunday"]
-DEFAULT_WORK_HOURS = "mon,wed,fri 16:00-18:00; tue,thu,sat 17:00-19:30"
+DEFAULT_BUSY_HOURS = "mon,wed,fri 16:00-18:00; tue,thu,sat 17:00-19:30"
 
 
 def hhmm(minutes):
@@ -85,8 +86,8 @@ def parse_schedule(spec, tz_hours=5.0):
 
 @dataclass
 class Mode:
-    kind: str = "work"        # work | night | busy
-    reason: str = ""          # night: "manual" (you said so) | "hours" (outside the schedule)
+    kind: str = "work"        # work (you are available) | night (you said «uxladim») | busy (your busy hours, or you said so)
+    reason: str = ""          # "manual" (you said so) | "hours" (the busy schedule)
     note: str = ""            # busy: what you are doing
     until: float = None       # busy: timestamp
 
@@ -97,11 +98,6 @@ NIGHT_MANUAL = {
     "ru": "Здравствуйте! Рабочее время {owner} на сегодня закончилось, сейчас он не может ответить. Завтра он ответит вам сам.",
     "en": "Hi! {owner}'s working hours are over for today, so he can't reply right now. He will answer you himself tomorrow.",
 }
-NIGHT_HOURS = {
-    "uz": "Assalomu alaykum! {owner} hozir ish vaqtida emas. {next} o'zi sizga javob beradi.",
-    "ru": "Здравствуйте! {owner} сейчас вне рабочего времени. Он ответит вам сам: {next}.",
-    "en": "Hi! {owner} is outside his working hours right now. He will answer you himself: {next}.",
-}
 BUSY = {
     "uz": "Assalomu alaykum! {owner} hozir band{note}. {until}",
     "ru": "Здравствуйте! {owner} сейчас занят{note}. {until}",
@@ -111,24 +107,7 @@ BUSY_UNTIL = {"uz": "Soat {t} dan keyin o'zi javob beradi.", "ru": "После {
 BUSY_OPEN = {"uz": "Bo'sh bo'lgach o'zi javob beradi.", "ru": "Освободится и ответит сам.", "en": "He will answer you himself when he is free."}
 
 
-def next_phrase(sched, now_dt, lang):
-    """'Bugun soat 16:00 dan keyin' / 'Ertaga soat 17:00 dan keyin' / 'Dushanba kuni soat 16:00 dan keyin'."""
-    nxt = sched.next_open(now_dt) if sched else None
-    if not nxt:
-        return {"uz": "Ish vaqti boshlangach", "ru": "в рабочее время", "en": "during his working hours"}[lang]
-    days = (nxt.date() - now_dt.date()).days
-    t = nxt.strftime("%H:%M")
-    if lang == "uz":
-        when = "Bugun" if days == 0 else "Ertaga" if days == 1 else f"{DAYS_UZ[nxt.weekday()].capitalize()} kuni"
-        return f"{when} soat {t} dan keyin"
-    if lang == "ru":
-        when = "сегодня" if days == 0 else "завтра" if days == 1 else DAYS_RU_ON[nxt.weekday()]
-        return f"{when} после {t}"
-    when = "today" if days == 0 else "tomorrow" if days == 1 else DAYS_EN_ON[nxt.weekday()]
-    return f"{when} after {t}"
-
-
-def mode_reply(mode, lang, owner, sched=None, now_dt=None):
+def mode_reply(mode, lang, owner, now_dt=None):
     lang = lang if lang in ("uz", "ru", "en") else "en"
     if mode.kind == "busy":
         note = f" ({mode.note})" if mode.note else ""
@@ -137,18 +116,14 @@ def mode_reply(mode, lang, owner, sched=None, now_dt=None):
         else:
             until = BUSY_OPEN[lang]
         return BUSY[lang].format(owner=owner, note=note, until=until)
-    if mode.reason == "hours" and sched is not None and now_dt is not None:
-        return NIGHT_HOURS[lang].format(owner=owner, next=next_phrase(sched, now_dt, lang))
     return NIGHT_MANUAL[lang].format(owner=owner)
 
 
-def parent_reply(mode, name, owner):
-    """For Dad / Mom: polite, third person (the message is marked as written by the assistant)."""
+def parent_reply(name, owner):
+    """For Dad / Mom at night: polite, third person (the message is marked as written by the assistant)."""
     n = (name or "").lower()
     voc = ", dadajon" if "dada" in n else ", ayajon" if "aya" in n else ""
-    if mode.kind == "night" and mode.reason == "manual":
-        return f"Assalomu alaykum{voc}! {owner} hozir uxlayapti. Ertalab o'zi sizga yozadi."
-    return f"Assalomu alaykum{voc}! {owner} hozir javob bera olmayapti. Imkon bo'lishi bilan o'zi sizga yozadi."
+    return f"Assalomu alaykum{voc}! {owner} hozir uxlayapti. Ertalab o'zi sizga yozadi."
 
 
 # ---------------------------------------------------------------- time words for scheduled messages
