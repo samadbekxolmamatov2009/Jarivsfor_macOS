@@ -23,9 +23,9 @@ class FakeTG:
         self.msgs, self.sent, self.next = [], [], 1000
         self.on_sleep = None
 
-    def add(self, text="", out=False, kind="text", id=None):
+    def add(self, text="", out=False, kind="text", id=None, ts=0.0):
         self.next += 1
-        self.msgs.append(Msg(id or self.next, out, text, kind))
+        self.msgs.append(Msg(id or self.next, out, text, kind, ts))
         return self.msgs[-1].id
 
     async def recent(self, chat, n):
@@ -527,9 +527,9 @@ class MultiTG:
         self.n = 5000
         self.deleted = []
 
-    def add(self, chat, text, out=False):
+    def add(self, chat, text, out=False, ts=0.0):
         self.n += 1
-        self.chats[chat].append(Msg(self.n, out, text, "text"))
+        self.chats[chat].append(Msg(self.n, out, text, "text", ts))
         return self.n
 
     async def recent(self, chat, n):
@@ -1052,6 +1052,93 @@ except Exception:
 check(not crashed, "a database outage never crashes the minute loop")
 run(r4.attention(5, "Brother", "x", "🙋"))
 check(len(r4.pending) == 1 and r4.effective().kind == "work", "...and the bot keeps working in memory while the database is down")
+
+# ================= a greeting only OPENS a conversation =================
+g = lite.strip_greeting
+check(g("Assalomu alaykum! Zufarbek hozir band.") == "Zufarbek hozir band." and g("Hi! I'm Zufarbek's AI assistant.") == "I'm Zufarbek's AI assistant."
+      and g("Здравствуйте! Он занят.") == "Он занят." and g("Assalomu alaykum, dadajon! Zufarbek uxlayapti.") == "Dadajon! Zufarbek uxlayapti."
+      and g("Salom, qalaysan?") == "Qalaysan?", "strip_greeting removes the opening greeting and capitalises the rest")
+check(g("Zufarbek hozir band.") == "Zufarbek hozir band." and g("Salom!") == "Salom!" and g("") == "" and g("History of hi") == "History of hi", "...and leaves everything else alone")
+check(Settings().convo_gap == 4 * 3600 and Settings.from_env({"CONVO_GAP_HOURS": "2"}).convo_gap == 7200, "CONVO_GAP_HOURS setting (default 4)")
+
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+M = lambda i, out, ts: Msg(i, out, "x", "text", ts)  # noqa: E731
+newm = [M(10, False, at(3, 14, 0))]
+check(r.is_ongoing([M(9, True, at(3, 13, 30))] + newm, newm), "last message 30 minutes ago -> ongoing")
+check(not r.is_ongoing([M(9, True, at(3, 9, 0))] + newm, newm), "last message 5 hours ago -> a new conversation")
+check(not r.is_ongoing(newm, newm) and not r.is_ongoing([M(9, False, 0)] + newm, newm), "no earlier message (or unknown time) -> a new conversation")
+check(r.is_ongoing([M(8, False, at(3, 11, 0)), M(9, True, at(3, 13, 59))] + newm, newm), "the most recent earlier message counts (either side)")
+
+# AI answers: the prompt says whether to greet
+seen.clear()
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+st.grace = 900
+tg.add("kecha gaplashgandik", out=True, ts=at(3, 13, 40))
+run(r.on_message(5, tg.add("dars soat nechada?", ts=at(3, 14, 0)), bro))
+check("CONTINUING conversation" in seen[0][0] and "do NOT start with a greeting" in seen[0][0] and "START of a conversation" not in seen[0][0],
+      "ongoing chat: Claude is told NOT to greet and not to repeat that he is busy")
+seen.clear()
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+run(r.on_message(5, tg.add("dars soat nechada?", ts=at(3, 14, 0)), bro))
+check("START of a conversation" in seen[0][0] and "ONE short, friendly greeting" in seen[0][0] and "CONTINUING" not in seen[0][0], "first message: Claude is told to greet once")
+seen.clear()
+r, tg, notes, st = mode_setup(None, at(3, 14, 0))
+tg.add("ertaga gaplashamiz", out=True, ts=at(3, 8, 0))                                  # 6 hours ago: an old conversation
+run(r.on_message(5, tg.add("dars soat nechada?", ts=at(3, 14, 0)), bro))
+check("START of a conversation" in seen[0][0], "the last message was 6 hours ago -> greeting is fine again")
+
+# fixed sentences: greeting only when the chat is new
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+tg.add("savol bor edi", ts=at(2, 16, 10))
+run(r.on_message(5, tg.add("yana bir narsa so'ramoqchi edim", ts=at(2, 16, 30)), bro))
+check(tg.sent[0].startswith("Zufarbek hozir band. Soat 18:00 dan keyin o'zi javob beradi.") and "Assalomu" not in tg.sent[0], "busy hours, ongoing chat: no «Assalomu alaykum», straight to the point")
+r, tg, notes, st = mode_setup(SCHED, at(2, 16, 30))
+run(r.on_message(5, tg.add("salom, bir savol bor edi", ts=at(2, 16, 30)), bro))
+check(tg.sent[0].startswith("Assalomu alaykum! Zufarbek hozir band."), "busy hours, new chat: greeted")
+r, tg, notes, st = mode_setup()
+run(r.apply_mode("night"))
+tg.add("men yozgandim", out=True, ts=clock[0] - 600)
+run(r.on_message(5, tg.add("ha, javob berasizmi?", ts=clock[0]), bro))
+check(tg.sent[0].startswith("Zufarbek bugungi ish vaqti tugagani uchun") and "Assalomu" not in tg.sent[0], "night, ongoing chat: no greeting")
+r, tg, notes, st = mode_setup()
+tg.add("o'g'lim, qalaysan", ts=clock[0] - 300)
+run(r.apply_mode("night"))
+run(r.on_message(5, tg.add("uxladingmi?", ts=clock[0]), dad))
+check(tg.sent[0].startswith("Dadajon! Zufarbek hozir uxlayapti."), "night, Dad in an ongoing chat: no «Assalomu alaykum», still respectful")
+r, tg, notes, st = mode_setup()
+tg.add("hello", ts=clock[0] - 120)
+run(r.on_message(5, tg.add("", kind="voice", ts=clock[0]), bro))
+check(tg.sent[0].startswith("Zufarbek Jumayev hozir band, ovozli xabarni eshita olmayman.") and "Assalomu" not in tg.sent[0], "voice message in an ongoing chat: no greeting")
+r, tg, notes, st = pay_setup()
+r.now = lambda: clock[0]
+tg.add("salom aka", ts=clock[0] - 200)
+run(r.on_message(5, tg.add("karta raqamingiz?", ts=clock[0]), muh))
+check("Assalomu" not in tg.sent[0] and CARD in tg.sent[0] and tg.sent[0].startswith("Cefr tys boti serveri uchun to'lov: 13$."), "card number in an ongoing chat: no greeting, still correct")
+r, tg, notes, st = make(broken)
+r.now = lambda: clock[0]
+tg.add("salom", ts=clock[0] - 100)
+run(r.on_message(5, tg.add("hello bro how are you", ts=clock[0]), bro))
+check(not tg.sent[0].lower().startswith(("hi", "hello")), "AI unavailable + ongoing chat: the fixed sentence is also without a greeting")
+r, tg, notes, st = make(fake_claude)
+run(r.on_message(5, tg.add("salom, qalaysan", ts=0), Sender(name="Random Person", id=71, contact=False)))
+check(tg.sent[0].startswith("Salom! Men Zufarbekning"), "a stranger's first message is greeted")
+r, tg, notes, st = make(fake_claude)
+r.now = lambda: clock[0]
+tg.add("hi", ts=clock[0] - 100)
+run(r.on_message(5, tg.add("are you there? hello", ts=clock[0]), Sender(name="Random Person", id=72, contact=False)))
+check(not tg.sent[0].startswith(("Hi", "Hello", "Salom")), "a stranger writing again in an ongoing chat gets no new greeting")
+
+# messages you ask Claude to write: told when to greet
+r, tg, notes, st, prompts = owner_setup({"action": "send", "target": "Muhammad Akam", "message": "Server to'lovi haqida eslatma.", "reply": ""})
+r.tg = MultiTG()
+r.now = lambda: clock[0]
+clock[0] = at(3, 14, 0)
+r.tg.add(6046141246, "salom aka", out=True, ts=at(3, 13, 30))
+r.tg.add(6046141246, "ha", ts=at(3, 13, 40))
+run(r.attention(6046141246, "Muhammad Akam", "savol", "🙋"))
+run(r.on_owner_message("serverga to'lov haqida ayt"))
+check("(30 daq. oldin)" in prompts[0][1] and "(20 daq. oldin)" in prompts[0][1] and "ONLY if the recent chat shows no message within the last 4 hours" in prompts[0][0],
+      "when you ask for a message, Claude sees how old the last messages are and is told to greet only after a long silence")
 
 print("\nFAILED:", fails) if fails else print("\nALL PASSED")
 sys.exit(1 if fails else 0)
